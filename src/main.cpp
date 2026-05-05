@@ -7,9 +7,10 @@ int main() {
   cout << unitbuf;
   cerr << unitbuf;
 
-  
-  cout << "$ ";
-  string command;
-  getline(std::cin, command);
-  cout << command  << ": command not found" << endl;
+  while(true){
+    cout << "$ ";
+    string command;
+    getline(std::cin, command);
+    cout << command  << ": command not found" << endl;
+  }
 }

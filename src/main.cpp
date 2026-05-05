@@ -11,6 +11,9 @@ int main() {
     cout << "$ ";
     string command;
     getline(std::cin, command);
+    if(command=="exit") {
+      break;
+    }
     cout << command  << ": command not found" << endl;
   }
 }

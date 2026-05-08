@@ -17,6 +17,11 @@ int main() {
     else if(command.substr(0,5) == "echo "){
       cout << command.substr(5) << endl;
     }
+    else if(command.substr(0,5) == "type "){
+      string com = command.substr(5);
+      if(com=="exit" || com=="type" || com=="echo") cout << com << " is a shell builtin" << endl;
+      else cout << command  << ": command not found" << endl;
+    }
     else {
       cout << command  << ": command not found" << endl;
     }

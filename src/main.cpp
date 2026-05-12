@@ -26,6 +26,7 @@ int main() {
       cout << std::filesystem::current_path().string() << endl;
     }
     else if(command == "cd") {
+      stringstream ss(command.substr(3));
       string path;
       ss >> path;
       
@@ -38,10 +39,13 @@ int main() {
       cout << command.substr(5) << endl;
     }
     else if(command.substr(0,5) == "type "){
-      string com = command.substr(5);
-      if(com=="exit" || com=="type" || com=="echo" || com=="pwd" || com=="cd") {
+      stringstream ss(command.substr(5));
+      string com;
+      ss >> com; 
+      
+      if(com == "exit" || com == "type" || com == "echo" || com == "pwd" || com == "cd") {
         cout << com << " is a shell builtin" << endl;
-      } 
+      }
       else {
         bool found = false;
         char* path_env = std::getenv("PATH");

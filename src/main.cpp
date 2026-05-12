@@ -32,7 +32,7 @@ int main() {
     }
     else if(command.substr(0,5) == "type "){
       string com = command.substr(5);
-      if(com=="exit" || com=="type" || com=="echo") {
+      if(com=="exit" || com=="type" || com=="echo" || com=="pwd") {
         cout << com << " is a shell builtin" << endl;
       } 
       else {

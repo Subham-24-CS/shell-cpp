@@ -25,7 +25,7 @@ int main() {
     else if(command == "pwd") {
       cout << std::filesystem::current_path().string() << endl;
     }
-    else if(command == "cd") {
+    else if(command.substr(0,3) == "cd ") {
       stringstream ss(command.substr(3));
       string path;
       ss >> path;

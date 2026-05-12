@@ -3,6 +3,7 @@
 #include <sstream>
 #include <vector>
 #include <unistd.h>
+#include <limits.h>
 #include <sys/wait.h>
 
 using namespace std;
@@ -19,6 +20,12 @@ int main() {
 
     if(command == "exit") {
       break;
+    }
+    else if(command == "pwd") {
+      char cwd[PATH_MAX];
+      if (getcwd(cwd, sizeof(cwd)) != NULL) {
+        cout << cwd << endl;
+      }
     }
     else if(command.substr(0,5) == "echo "){
       cout << command.substr(5) << endl;

@@ -4,6 +4,7 @@
 #include <vector>
 #include <unistd.h>
 #include <limits.h>
+#include <filesystem>
 #include <sys/wait.h>
 
 using namespace std;
@@ -22,17 +23,23 @@ int main() {
       break;
     }
     else if(command == "pwd") {
-      char cwd[PATH_MAX];
-      if (getcwd(cwd, sizeof(cwd)) != NULL) {
-        cout << cwd << endl;
+      cout << std::filesystem::current_path().string() << endl;
+    }
+    else if(command == "cd") {
+      string path;
+      ss >> path;
+      
+      if (chdir(path.c_str()) != 0) {
+        cout << "cd: " << path << ": No such file or directory" << endl;
       }
+
     }
     else if(command.substr(0,5) == "echo "){
       cout << command.substr(5) << endl;
     }
     else if(command.substr(0,5) == "type "){
       string com = command.substr(5);
-      if(com=="exit" || com=="type" || com=="echo" || com=="pwd") {
+      if(com=="exit" || com=="type" || com=="echo" || com=="pwd" || com=="cd") {
         cout << com << " is a shell builtin" << endl;
       } 
       else {

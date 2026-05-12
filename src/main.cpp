@@ -26,15 +26,25 @@ int main() {
       cout << std::filesystem::current_path().string() << endl;
     }
     else if(command.substr(0,3) == "cd ") {
-      stringstream ss(command.substr(3));
-      string path;
-      ss >> path;
-      
-      if (chdir(path.c_str()) != 0) {
-        cout << "cd: " << path << ": No such file or directory" << endl;
+      string path = command.substr(3);
+    
+      stringstream ss_path(path);
+      string clean_path;
+      ss_path >> clean_path;
+
+      if (clean_path == "~") {
+        char* home = getenv("HOME");
+        if (home) {
+          clean_path = string(home);
+        }
       }
 
+      if (chdir(clean_path.c_str()) != 0) {
+        cout << "cd: " << clean_path << ": No such file or directory" << endl;
+      }
     }
+
+    
     else if(command.substr(0,5) == "echo "){
       cout << command.substr(5) << endl;
     }

@@ -52,8 +52,7 @@ char* command_generator(const char* text, int state) {
 char** shell_completion(const char* text, int start, int end) {
     // Disable readline's default behavior of falling back to filename completion 
     // when our custom builtin generator yields no results.
-    rl_attempted_completion_overrided = 1;
-
+    rl_attempted_completion_over = 1;
     // We only want to autocomplete the first token (the command itself)
     if (start == 0) {
         return rl_completion_matches(text, command_generator);

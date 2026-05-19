@@ -105,30 +105,34 @@ int main() {
             continue;
         }
 
-        // Check for redirection operators ('>' or '1>')
+        // Flags and file targets for both stdout and stderr redirections
         bool redirect_output = false;
         string redirect_file = "";
+        bool redirect_error = false;
+        string error_file = "";
         vector<string> clean_args;
 
         for (size_t i = 0; i < args.size(); ++i) {
             if ((args[i] == ">" || args[i] == "1>") && (i + 1 < args.size())) {
                 redirect_output = true;
                 redirect_file = args[i + 1];
-                // Skip both the operator and the filename from execution arguments
-                i++; 
+                i++; // Skip filename
+            } else if (args[i] == "2>" && (i + 1 < args.size())) {
+                redirect_error = true;
+                error_file = args[i + 1];
+                i++; // Skip filename
             } else {
                 clean_args.push_back(args[i]);
             }
         }
 
-        // If a trailing delimiter leaves us with no actual command, skip
         if (clean_args.empty()) {
             continue;
         }
 
         string cmd = clean_args[0];
 
-        // Setup redirection for builtins using C++ streambufs
+        // Setup stream redirection buffers for builtins
         streambuf* old_cout = cout.rdbuf();
         ofstream out_file;
         if (redirect_output) {
@@ -138,9 +142,18 @@ int main() {
             }
         }
 
+        streambuf* old_cerr = cerr.rdbuf();
+        ofstream err_file;
+        if (redirect_error) {
+            err_file.open(error_file, ios::out | ios::trunc);
+            if (err_file.is_open()) {
+                cerr.rdbuf(err_file.rdbuf());
+            }
+        }
+
         if (cmd == "exit") {
-            // Restore stdout before exiting just in case
             cout.rdbuf(old_cout);
+            cerr.rdbuf(old_cerr);
             break;
         }
         else if (cmd == "pwd") {
@@ -170,6 +183,7 @@ int main() {
         else if (cmd == "type") {
             if (clean_args.size() < 2) {
                 if (redirect_output) cout.rdbuf(old_cout);
+                if (redirect_error) cerr.rdbuf(old_cerr);
                 continue;
             }
             string com = clean_args[1];
@@ -225,12 +239,20 @@ int main() {
 
                 pid_t pid = fork();
                 if (pid == 0) {
-                    // Child process output redirection via low-level system call
+                    // Child standard output redirection
                     if (redirect_output) {
-                        int fd = open(redirect_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-                        if (fd != -1) {
-                            dup2(fd, STDOUT_FILENO);
-                            close(fd);
+                        int fd_out = open(redirect_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                        if (fd_out != -1) {
+                            dup2(fd_out, STDOUT_FILENO);
+                            close(fd_out);
+                        }
+                    }
+                    // Child standard error redirection
+                    if (redirect_error) {
+                        int fd_err = open(error_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                        if (fd_err != -1) {
+                            dup2(fd_err, STDERR_FILENO);
+                            close(fd_err);
                         }
                     }
                     execvp(c_args[0], c_args.data());
@@ -244,10 +266,14 @@ int main() {
             }
         }
 
-        // Restore standard C++ output routing after executing any statement
+        // Restore stream targets for the next loop execution
         if (redirect_output) {
             cout.rdbuf(old_cout);
             out_file.close();
+        }
+        if (redirect_error) {
+            cerr.rdbuf(old_cerr);
+            err_file.close();
         }
     }
     return 0;

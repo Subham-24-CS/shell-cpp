@@ -17,7 +17,7 @@
 
 using namespace std;
 
-// List of builtins we want to support autocomplete for (added complete here)
+// List of builtins we want to support autocomplete for
 const vector<string> builtins = {"echo", "exit", "complete"};
 
 // Custom completion generator function called repeatedly by readline for COMMANDS.
@@ -379,8 +379,11 @@ int main() {
             cout << endl;
         }
         else if (cmd == "complete") {
-            // Placeholder execution logic for this stage
-            // We just absorb it silently since execution logic isn't tested yet
+            // Check for the -p flag and ensure a command follows it
+            if (clean_args.size() >= 3 && clean_args[1] == "-p") {
+                string target_cmd = clean_args[2];
+                cout << "complete: " << target_cmd << ": no completion specification" << endl;
+            }
         }
         else if (cmd == "type") {
             if (clean_args.size() < 2) {
@@ -390,7 +393,6 @@ int main() {
             }
             string com = clean_args[1];
             
-            // Added "complete" to the shell builtin detection check branch
             if (com == "exit" || com == "type" || com == "echo" || com == "pwd" || com == "cd" || com == "complete") {
                 cout << com << " is a shell builtin" << endl;
             }

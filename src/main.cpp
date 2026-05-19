@@ -9,7 +9,7 @@
 
 using namespace std;
 
-// Parses the command line string handling both single and double quotes.
+// Parses the command line string handling single quotes, double quotes, and unquoted backslashes.
 vector<string> parse_arguments(const string& cmd_line) {
     vector<string> args;
     string current_arg = "";
@@ -37,7 +37,14 @@ vector<string> parse_arguments(const string& cmd_line) {
                 has_content = true;
             }
         } else {
-            if (c == '\'') {
+            if (c == '\\') {
+                // Unquoted backslash: escape the very next character if it exists
+                if (i + 1 < cmd_line.length()) {
+                    current_arg += cmd_line[i + 1];
+                    has_content = true;
+                    i++; // Skip the next character since we processed it literally
+                }
+            } else if (c == '\'') {
                 in_single_quotes = true;
                 has_content = true;
             } else if (c == '"') {
@@ -81,7 +88,7 @@ int main() {
             continue;
         }
 
-        // Tokenize the string using our updated quote-aware parser
+        // Tokenize the string using our updated quote-and-backslash parser
         vector<string> args = parse_arguments(command_line);
         if (args.empty()) {
             continue;

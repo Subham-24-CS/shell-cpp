@@ -6,6 +6,8 @@
 #include <limits.h>
 #include <filesystem>
 #include <sys/wait.h>
+#include <fstream>
+#include <fcntl.h>
 
 using namespace std;
 
@@ -30,20 +32,16 @@ vector<string> parse_arguments(const string& cmd_line) {
             }
         } else if (in_double_quotes) {
             if (c == '\\') {
-                // Peek at the next character inside double quotes
                 if (i + 1 < cmd_line.length()) {
                     char next_c = cmd_line[i + 1];
                     if (next_c == '"' || next_c == '\\') {
-                        // It's a special character sequence, escape it
                         current_arg += next_c;
-                        i++; // Skip processing the next character
+                        i++; 
                     } else {
-                        // Treat the backslash literally for non-special characters
                         current_arg += c;
                     }
                     has_content = true;
                 } else {
-                    // Trailing backslash at the end of the string
                     current_arg += c;
                     has_content = true;
                 }
@@ -56,11 +54,10 @@ vector<string> parse_arguments(const string& cmd_line) {
             }
         } else {
             if (c == '\\') {
-                // Unquoted backslash: escape the very next character if it exists
                 if (i + 1 < cmd_line.length()) {
                     current_arg += cmd_line[i + 1];
                     has_content = true;
-                    i++; // Skip the next character
+                    i++; 
                 }
             } else if (c == '\'') {
                 in_single_quotes = true;
@@ -69,21 +66,18 @@ vector<string> parse_arguments(const string& cmd_line) {
                 in_double_quotes = true;
                 has_content = true;
             } else if (c == ' ' || c == '\t') {
-                // Unquoted whitespace acts as an argument delimiter
                 if (has_content) {
                     args.push_back(current_arg);
                     current_arg = "";
                     has_content = false;
                 }
             } else {
-                // Normal unquoted character
                 current_arg += c;
                 has_content = true;
             }
         }
     }
 
-    // Don't forget the last argument if the line didn't end in an unquoted space
     if (has_content) {
         args.push_back(current_arg);
     }
@@ -106,22 +100,54 @@ int main() {
             continue;
         }
 
-        // Tokenize the string using our updated quote-and-backslash parser
         vector<string> args = parse_arguments(command_line);
         if (args.empty()) {
             continue;
         }
 
-        string cmd = args[0];
+        // Check for redirection operators ('>' or '1>')
+        bool redirect_output = false;
+        string redirect_file = "";
+        vector<string> clean_args;
+
+        for (size_t i = 0; i < args.size(); ++i) {
+            if ((args[i] == ">" || args[i] == "1>") && (i + 1 < args.size())) {
+                redirect_output = true;
+                redirect_file = args[i + 1];
+                // Skip both the operator and the filename from execution arguments
+                i++; 
+            } else {
+                clean_args.push_back(args[i]);
+            }
+        }
+
+        // If a trailing delimiter leaves us with no actual command, skip
+        if (clean_args.empty()) {
+            continue;
+        }
+
+        string cmd = clean_args[0];
+
+        // Setup redirection for builtins using C++ streambufs
+        streambuf* old_cout = cout.rdbuf();
+        ofstream out_file;
+        if (redirect_output) {
+            out_file.open(redirect_file, ios::out | ios::trunc);
+            if (out_file.is_open()) {
+                cout.rdbuf(out_file.rdbuf());
+            }
+        }
 
         if (cmd == "exit") {
+            // Restore stdout before exiting just in case
+            cout.rdbuf(old_cout);
             break;
         }
         else if (cmd == "pwd") {
             cout << filesystem::current_path().string() << endl;
         }
         else if (cmd == "cd") {
-            string clean_path = (args.size() > 1) ? args[1] : "~";
+            string clean_path = (clean_args.size() > 1) ? clean_args[1] : "~";
 
             if (clean_path == "~") {
                 char* home = getenv("HOME");
@@ -135,18 +161,18 @@ int main() {
             }
         }
         else if (cmd == "echo") {
-            // Print all arguments separated by a single space
-            for (size_t i = 1; i < args.size(); ++i) {
-                cout << args[i];
-                if (i + 1 < args.size()) cout << " ";
+            for (size_t i = 1; i < clean_args.size(); ++i) {
+                cout << clean_args[i];
+                if (i + 1 < clean_args.size()) cout << " ";
             }
             cout << endl;
         }
         else if (cmd == "type") {
-            if (args.size() < 2) {
+            if (clean_args.size() < 2) {
+                if (redirect_output) cout.rdbuf(old_cout);
                 continue;
             }
-            string com = args[1];
+            string com = clean_args[1];
             
             if (com == "exit" || com == "type" || com == "echo" || com == "pwd" || com == "cd") {
                 cout << com << " is a shell builtin" << endl;
@@ -191,16 +217,22 @@ int main() {
             }
 
             if (found) {
-                // Build argument vector for execvp safely
                 vector<char*> c_args;
-                for (auto& s : args) {
+                for (auto& s : clean_args) {
                     c_args.push_back(&s[0]);
                 }
                 c_args.push_back(nullptr);
 
                 pid_t pid = fork();
                 if (pid == 0) {
-                    // Child process
+                    // Child process output redirection via low-level system call
+                    if (redirect_output) {
+                        int fd = open(redirect_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                        if (fd != -1) {
+                            dup2(fd, STDOUT_FILENO);
+                            close(fd);
+                        }
+                    }
                     execvp(c_args[0], c_args.data());
                     exit(1); 
                 } else {
@@ -210,6 +242,12 @@ int main() {
             } else {
                 cout << cmd << ": command not found" << endl;
             }
+        }
+
+        // Restore standard C++ output routing after executing any statement
+        if (redirect_output) {
+            cout.rdbuf(old_cout);
+            out_file.close();
         }
     }
     return 0;

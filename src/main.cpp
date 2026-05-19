@@ -105,8 +105,9 @@ int main() {
             continue;
         }
 
-        // Flags and file targets for both stdout and stderr redirections
+        // Flags and file targets for stdout and stderr redirections
         bool redirect_output = false;
+        bool append_output = false; // Flag specifically for >> and 1>>
         string redirect_file = "";
         bool redirect_error = false;
         string error_file = "";
@@ -115,12 +116,18 @@ int main() {
         for (size_t i = 0; i < args.size(); ++i) {
             if ((args[i] == ">" || args[i] == "1>") && (i + 1 < args.size())) {
                 redirect_output = true;
+                append_output = false;
                 redirect_file = args[i + 1];
-                i++; // Skip filename
+                i++; 
+            } else if ((args[i] == ">>" || args[i] == "1>>") && (i + 1 < args.size())) {
+                redirect_output = true;
+                append_output = true;
+                redirect_file = args[i + 1];
+                i++; 
             } else if (args[i] == "2>" && (i + 1 < args.size())) {
                 redirect_error = true;
                 error_file = args[i + 1];
-                i++; // Skip filename
+                i++; 
             } else {
                 clean_args.push_back(args[i]);
             }
@@ -136,7 +143,11 @@ int main() {
         streambuf* old_cout = cout.rdbuf();
         ofstream out_file;
         if (redirect_output) {
-            out_file.open(redirect_file, ios::out | ios::trunc);
+            if (append_output) {
+                out_file.open(redirect_file, ios::out | ios::app);
+            } else {
+                out_file.open(redirect_file, ios::out | ios::trunc);
+            }
             if (out_file.is_open()) {
                 cout.rdbuf(out_file.rdbuf());
             }
@@ -241,7 +252,13 @@ int main() {
                 if (pid == 0) {
                     // Child standard output redirection
                     if (redirect_output) {
-                        int fd_out = open(redirect_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                        int flags = O_WRONLY | O_CREAT;
+                        if (append_output) {
+                            flags |= O_APPEND;
+                        } else {
+                            flags |= O_TRUNC;
+                        }
+                        int fd_out = open(redirect_file.c_str(), flags, 0644);
                         if (fd_out != -1) {
                             dup2(fd_out, STDOUT_FILENO);
                             close(fd_out);

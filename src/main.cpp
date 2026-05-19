@@ -78,7 +78,7 @@ char* command_generator(const char* text, int state) {
     return nullptr;
 }
 
-// Custom completion generator function called repeatedly by readline for FILENAMES in current directory.
+// Custom completion generator function called repeatedly by readline for FILENAMES (supporting nested paths).
 char* filename_generator(const char* text, int state) {
     static vector<string> file_matches;
     static size_t file_index = 0;
@@ -86,18 +86,32 @@ char* filename_generator(const char* text, int state) {
     if (!state) {
         file_matches.clear();
         file_index = 0;
-        size_t len = strlen(text);
+
+        string text_str(text);
+        string dir_to_search = "."; // Default to current directory
+        string prefix = text_str;   // Default prefix is the entire token
+        string dir_prefix = "";     // Kept to prepend back to the result
+
+        // Check if there's a path separator present
+        size_t last_slash = text_str.find_last_of('/');
+        if (last_slash != string::npos) {
+            dir_to_search = text_str.substr(0, last_slash + 1);
+            prefix = text_str.substr(last_slash + 1);
+            dir_prefix = dir_to_search;
+        }
+
+        size_t len = prefix.length();
 
         try {
-            string current_dir = filesystem::current_path().string();
-            if (filesystem::exists(current_dir) && filesystem::is_directory(current_dir)) {
-                for (const auto& entry : filesystem::directory_iterator(current_dir)) {
+            if (filesystem::exists(dir_to_search) && filesystem::is_directory(dir_to_search)) {
+                for (const auto& entry : filesystem::directory_iterator(dir_to_search)) {
                     string filename = entry.path().filename().string();
                     
-                    // Match file prefix against text parameter
-                    if (filename.compare(0, len, text) == 0) {
+                    // Match file prefix against the parsed prefix
+                    if (filename.compare(0, len, prefix) == 0) {
                         if (filesystem::is_regular_file(entry.status())) {
-                            file_matches.push_back(filename);
+                            // Reconstruct the full string (directory path prefix + actual filename match)
+                            file_matches.push_back(dir_prefix + filename);
                         }
                     }
                 }
@@ -123,7 +137,7 @@ char** shell_completion(const char* text, int start, int end) {
         // Autocomplete the primary command
         return rl_completion_matches(text, command_generator);
     } else {
-        // Autocomplete standard argument filenames in the current working directory
+        // Autocomplete standard argument filenames anywhere in the target path
         return rl_completion_matches(text, filename_generator);
     }
 }

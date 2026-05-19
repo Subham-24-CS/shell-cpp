@@ -9,6 +9,7 @@
 #include <fstream>
 #include <fcntl.h>
 #include <set>
+#include <map>
 #include <algorithm>
 
 // Include Readline headers
@@ -19,6 +20,9 @@ using namespace std;
 
 // List of builtins we want to support autocomplete for
 const vector<string> builtins = {"echo", "exit", "complete"};
+
+// Global registry for programmable completions: maps a command name to its completer script path
+map<string, string> programmable_completions;
 
 // Custom completion generator function called repeatedly by readline for COMMANDS.
 char* command_generator(const char* text, int state) {
@@ -379,10 +383,22 @@ int main() {
             cout << endl;
         }
         else if (cmd == "complete") {
-            // Check for the -p flag and ensure a command follows it
             if (clean_args.size() >= 3 && clean_args[1] == "-p") {
                 string target_cmd = clean_args[2];
-                cout << "complete: " << target_cmd << ": no completion specification" << endl;
+                // Check if a completion path is registered for this specific command name
+                auto it = programmable_completions.find(target_cmd);
+                if (it != programmable_completions.end()) {
+                    // Reconstruct the registered item back into the normalized format specification string
+                    cout << "complete -C '" << it->second << "' " << target_cmd << endl;
+                } else {
+                    cout << "complete: " << target_cmd << ": no completion specification" << endl;
+                }
+            } 
+            else if (clean_args.size() >= 4 && clean_args[1] == "-C") {
+                string script_path = clean_args[2];
+                string target_cmd = clean_args[3];
+                // Register or overwrite the custom completion specification in our global map storage
+                programmable_completions[target_cmd] = script_path;
             }
         }
         else if (cmd == "type") {

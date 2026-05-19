@@ -9,7 +9,58 @@
 #include <fstream>
 #include <fcntl.h>
 
+// Include Readline headers
+#include <readline/readline.h>
+#include <readline/history.h>
+
 using namespace std;
+
+// List of builtins we want to support autocomplete for in this stage
+const vector<string> builtins = {"echo", "exit"};
+
+// Custom completion generator function called repeatedly by readline.
+// 'text' is the partial word typed so far.
+// 'state' is 0 on the first call, and non-zero on subsequent calls.
+char* command_generator(const char* text, int state) {
+    static size_t list_index, len;
+    
+    // First time initialized for this word completion match group
+    if (!state) {
+        list_index = 0;
+        len = strlen(text);
+    }
+
+    // Return the next match in our builtin command array
+    while (list_index < builtins.size()) {
+        const string& cmd = builtins[list_index];
+        list_index++;
+
+        // Check if the prefix matches what the user typed
+        if (cmd.compare(0, len, text) == 0) {
+            // Readline expects a dynamically allocated C-string copy
+            char* match = (char*)malloc(cmd.length() + 1);
+            strcpy(match, cmd.c_str());
+            return match;
+        }
+    }
+
+    // No more matches left
+    return nullptr;
+}
+
+// Custom completion bridge function hooked into readline's completion engine
+char** shell_completion(const char* text, int start, int end) {
+    // Disable readline's default behavior of falling back to filename completion 
+    // when our custom builtin generator yields no results.
+    rl_attempted_completion_overrided = 1;
+
+    // We only want to autocomplete the first token (the command itself)
+    if (start == 0) {
+        return rl_completion_matches(text, command_generator);
+    }
+    
+    return nullptr;
+}
 
 // Parses the command line string handling single quotes, double quotes, and backslashes contextually.
 vector<string> parse_arguments(const string& cmd_line) {
@@ -17,7 +68,7 @@ vector<string> parse_arguments(const string& cmd_line) {
     string current_arg = "";
     bool in_single_quotes = false;
     bool in_double_quotes = false;
-    bool has_content = false; // Tracks if we are building an argument
+    bool has_content = false; 
 
     for (size_t i = 0; i < cmd_line.length(); ++i) {
         char c = cmd_line[i];
@@ -89,12 +140,20 @@ int main() {
     cout << unitbuf;
     cerr << unitbuf;
 
+    // Register our custom tab completion callback function
+    rl_attempted_completion_function = shell_completion;
+
     while (true) {
-        cout << "$ ";
-        string command_line;
-        if (!getline(cin, command_line)) {
+        // Use readline instead of raw cout/getline to accept input and track tabs
+        char* input_raw = readline("$ ");
+        
+        // Handle EOF condition (like hitting Ctrl+D)
+        if (!input_raw) {
             break; 
         }
+
+        string command_line(input_raw);
+        free(input_raw); // Free memory allocated by readline
 
         if (command_line.empty()) {
             continue;
@@ -110,7 +169,7 @@ int main() {
         bool append_output = false; 
         string redirect_file = "";
         bool redirect_error = false;
-        bool append_error = false; // Flag specifically for 2>>
+        bool append_error = false; 
         string error_file = "";
         vector<string> clean_args;
 

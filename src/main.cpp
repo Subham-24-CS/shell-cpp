@@ -9,30 +9,39 @@
 
 using namespace std;
 
-// Parses the command line string into separate arguments while handling single quotes.
+// Parses the command line string handling both single and double quotes.
 vector<string> parse_arguments(const string& cmd_line) {
     vector<string> args;
     string current_arg = "";
     bool in_single_quotes = false;
-    bool has_content = false; // Tracks if we are building an argument (handles empty strings like '')
+    bool in_double_quotes = false;
+    bool has_content = false; // Tracks if we are building an argument
 
     for (size_t i = 0; i < cmd_line.length(); ++i) {
         char c = cmd_line[i];
 
         if (in_single_quotes) {
             if (c == '\'') {
-                // Closing quote found, switch state back
                 in_single_quotes = false;
                 has_content = true; 
             } else {
-                // Everything inside single quotes is taken literally
+                current_arg += c;
+                has_content = true;
+            }
+        } else if (in_double_quotes) {
+            if (c == '"') {
+                in_double_quotes = false;
+                has_content = true;
+            } else {
                 current_arg += c;
                 has_content = true;
             }
         } else {
             if (c == '\'') {
-                // Opening quote found, switch state
                 in_single_quotes = true;
+                has_content = true;
+            } else if (c == '"') {
+                in_double_quotes = true;
                 has_content = true;
             } else if (c == ' ' || c == '\t') {
                 // Unquoted whitespace acts as an argument delimiter
@@ -49,7 +58,7 @@ vector<string> parse_arguments(const string& cmd_line) {
         }
     }
 
-    // Don't forget the last argument if the line didn't end in a space
+    // Don't forget the last argument if the line didn't end in an unquoted space
     if (has_content) {
         args.push_back(current_arg);
     }
@@ -72,7 +81,7 @@ int main() {
             continue;
         }
 
-        // Tokenize the string using our new quote-aware parser
+        // Tokenize the string using our updated quote-aware parser
         vector<string> args = parse_arguments(command_line);
         if (args.empty()) {
             continue;

@@ -8,6 +8,7 @@
 #include <sys/wait.h>
 #include <fstream>
 #include <fcntl.h>
+#include <set>
 
 // Include Readline headers
 #include <readline/readline.h>
@@ -15,33 +16,73 @@
 
 using namespace std;
 
-// List of builtins we want to support autocomplete for in this stage
+// List of builtins we want to support autocomplete for
 const vector<string> builtins = {"echo", "exit"};
 
 // Custom completion generator function called repeatedly by readline.
-// 'text' is the partial word typed so far.
-// 'state' is 0 on the first call, and non-zero on subsequent calls.
 char* command_generator(const char* text, int state) {
-    static size_t list_index, len;
+    // We use a static iterator and vector to preserve state across consecutive calls for the same word match
+    static vector<string> current_matches;
+    static size_t match_index = 0;
     
     // First time initialized for this word completion match group
     if (!state) {
-        list_index = 0;
-        len = strlen(text);
+        current_matches.clear();
+        match_index = 0;
+        size_t len = strlen(text);
+        set<string> unique_matches;
+
+        // 1. Check Builtins
+        for (const string& cmd : builtins) {
+            if (cmd.compare(0, len, text) == 0) {
+                unique_matches.insert(cmd);
+            }
+        }
+
+        // 2. Scan PATH for External Executables
+        char* path_env = getenv("PATH");
+        if (path_env) {
+            stringstream ss_path(path_env);
+            string dir_path;
+            
+            // Split PATH by ':' delimiter
+            while (getline(ss_path, dir_path, ':')) {
+                if (dir_path.empty()) continue;
+                
+                try {
+                    // Gracefully skip if path directory does not exist or isn't a directory
+                    if (filesystem::exists(dir_path) && filesystem::is_directory(dir_path)) {
+                        for (const auto& entry : filesystem::directory_iterator(dir_path)) {
+                            string filename = entry.path().filename().string();
+                            
+                            // Match partial prefix text
+                            if (filename.compare(0, len, text) == 0) {
+                                string full_path = entry.path().string();
+                                // Ensure it's a file and we have execute permissions
+                                if (filesystem::is_regular_file(entry.status()) && access(full_path.c_str(), X_OK) == 0) {
+                                    unique_matches.insert(filename);
+                                }
+                            }
+                        }
+                    }
+                } catch (...) {
+                    // Absorb filesystem exceptions gracefully (e.g. permission issues on system folders)
+                }
+            }
+        }
+
+        // Populate our persistent ordered sequence from the unique set
+        for (const string& match_str : unique_matches) {
+            current_matches.push_back(match_str);
+        }
     }
 
-    // Return the next match in our builtin command array
-    while (list_index < builtins.size()) {
-        const string& cmd = builtins[list_index];
-        list_index++;
-
-        // Check if the prefix matches what the user typed
-        if (cmd.compare(0, len, text) == 0) {
-            // Readline expects a dynamically allocated C-string copy
-            char* match = (char*)malloc(cmd.length() + 1);
-            strcpy(match, cmd.c_str());
-            return match;
-        }
+    // Return the next matching element if available
+    if (match_index < current_matches.size()) {
+        const string& match_str = current_matches[match_index++];
+        char* match = (char*)malloc(match_str.length() + 1);
+        strcpy(match, match_str.c_str());
+        return match;
     }
 
     // No more matches left
@@ -51,8 +92,8 @@ char* command_generator(const char* text, int state) {
 // Custom completion bridge function hooked into readline's completion engine
 char** shell_completion(const char* text, int start, int end) {
     // Disable readline's default behavior of falling back to filename completion 
-    // when our custom builtin generator yields no results.
     rl_attempted_completion_over = 1;
+
     // We only want to autocomplete the first token (the command itself)
     if (start == 0) {
         return rl_completion_matches(text, command_generator);
@@ -146,13 +187,12 @@ int main() {
         // Use readline instead of raw cout/getline to accept input and track tabs
         char* input_raw = readline("$ ");
         
-        // Handle EOF condition (like hitting Ctrl+D)
         if (!input_raw) {
             break; 
         }
 
         string command_line(input_raw);
-        free(input_raw); // Free memory allocated by readline
+        free(input_raw); 
 
         if (command_line.empty()) {
             continue;

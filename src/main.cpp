@@ -69,6 +69,10 @@ char* command_generator(const char* text, int state) {
     }
 
     if (match_index < current_matches.size()) {
+        // For command completions, ensure a trailing space is appended
+        rl_completion_append_character = ' ';
+        rl_completion_suppress_append = 0;
+
         const string& match_str = current_matches[match_index++];
         char* match = (char*)malloc(match_str.length() + 1);
         strcpy(match, match_str.c_str());
@@ -78,21 +82,23 @@ char* command_generator(const char* text, int state) {
     return nullptr;
 }
 
-// Custom completion generator function called repeatedly by readline for FILENAMES (supporting nested paths).
+// Custom completion generator function called repeatedly by readline for FILENAMES and DIRECTORIES.
 char* filename_generator(const char* text, int state) {
     static vector<string> file_matches;
+    static vector<bool> is_dir_flags;
     static size_t file_index = 0;
 
     if (!state) {
         file_matches.clear();
+        is_dir_flags.clear();
         file_index = 0;
 
         string text_str(text);
-        string dir_to_search = "."; // Default to current directory
-        string prefix = text_str;   // Default prefix is the entire token
-        string dir_prefix = "";     // Kept to prepend back to the result
+        string dir_to_search = "."; 
+        string prefix = text_str;   
+        string dir_prefix = "";     
 
-        // Check if there's a path separator present
+        // Split target string if path separator exists
         size_t last_slash = text_str.find_last_of('/');
         if (last_slash != string::npos) {
             dir_to_search = text_str.substr(0, last_slash + 1);
@@ -107,11 +113,15 @@ char* filename_generator(const char* text, int state) {
                 for (const auto& entry : filesystem::directory_iterator(dir_to_search)) {
                     string filename = entry.path().filename().string();
                     
-                    // Match file prefix against the parsed prefix
+                    // Match item prefix against user token
                     if (filename.compare(0, len, prefix) == 0) {
-                        if (filesystem::is_regular_file(entry.status())) {
-                            // Reconstruct the full string (directory path prefix + actual filename match)
+                        bool is_dir = filesystem::is_directory(entry.status());
+                        bool is_reg = filesystem::is_regular_file(entry.status());
+                        
+                        // We want to track both regular files and directories
+                        if (is_reg || is_dir) {
                             file_matches.push_back(dir_prefix + filename);
+                            is_dir_flags.push_back(is_dir);
                         }
                     }
                 }
@@ -120,6 +130,15 @@ char* filename_generator(const char* text, int state) {
     }
 
     if (file_index < file_matches.size()) {
+        // Change postfix matching behavior depending on whether it's a folder or file
+        if (is_dir_flags[file_index]) {
+            rl_completion_append_character = '/'; // Append trailing slash
+            rl_completion_suppress_append = 0;     // Tell Readline to perform the append action
+        } else {
+            rl_completion_append_character = ' '; // Append trailing space
+            rl_completion_suppress_append = 0;
+        }
+
         const string& match_str = file_matches[file_index++];
         char* match = (char*)malloc(match_str.length() + 1);
         strcpy(match, match_str.c_str());
@@ -134,10 +153,8 @@ char** shell_completion(const char* text, int start, int end) {
     rl_attempted_completion_over = 1;
 
     if (start == 0) {
-        // Autocomplete the primary command
         return rl_completion_matches(text, command_generator);
     } else {
-        // Autocomplete standard argument filenames anywhere in the target path
         return rl_completion_matches(text, filename_generator);
     }
 }

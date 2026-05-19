@@ -19,13 +19,11 @@ using namespace std;
 // List of builtins we want to support autocomplete for
 const vector<string> builtins = {"echo", "exit"};
 
-// Custom completion generator function called repeatedly by readline.
+// Custom completion generator function called repeatedly by readline for COMMANDS.
 char* command_generator(const char* text, int state) {
-    // We use a static iterator and vector to preserve state across consecutive calls for the same word match
     static vector<string> current_matches;
     static size_t match_index = 0;
     
-    // First time initialized for this word completion match group
     if (!state) {
         current_matches.clear();
         match_index = 0;
@@ -45,39 +43,31 @@ char* command_generator(const char* text, int state) {
             stringstream ss_path(path_env);
             string dir_path;
             
-            // Split PATH by ':' delimiter
             while (getline(ss_path, dir_path, ':')) {
                 if (dir_path.empty()) continue;
                 
                 try {
-                    // Gracefully skip if path directory does not exist or isn't a directory
                     if (filesystem::exists(dir_path) && filesystem::is_directory(dir_path)) {
                         for (const auto& entry : filesystem::directory_iterator(dir_path)) {
                             string filename = entry.path().filename().string();
                             
-                            // Match partial prefix text
                             if (filename.compare(0, len, text) == 0) {
                                 string full_path = entry.path().string();
-                                // Ensure it's a file and we have execute permissions
                                 if (filesystem::is_regular_file(entry.status()) && access(full_path.c_str(), X_OK) == 0) {
                                     unique_matches.insert(filename);
                                 }
                             }
                         }
                     }
-                } catch (...) {
-                    // Absorb filesystem exceptions gracefully (e.g. permission issues on system folders)
-                }
+                } catch (...) {}
             }
         }
 
-        // Populate our persistent ordered sequence from the unique set
         for (const string& match_str : unique_matches) {
             current_matches.push_back(match_str);
         }
     }
 
-    // Return the next matching element if available
     if (match_index < current_matches.size()) {
         const string& match_str = current_matches[match_index++];
         char* match = (char*)malloc(match_str.length() + 1);
@@ -85,21 +75,57 @@ char* command_generator(const char* text, int state) {
         return match;
     }
 
-    // No more matches left
+    return nullptr;
+}
+
+// Custom completion generator function called repeatedly by readline for FILENAMES in current directory.
+char* filename_generator(const char* text, int state) {
+    static vector<string> file_matches;
+    static size_t file_index = 0;
+
+    if (!state) {
+        file_matches.clear();
+        file_index = 0;
+        size_t len = strlen(text);
+
+        try {
+            string current_dir = filesystem::current_path().string();
+            if (filesystem::exists(current_dir) && filesystem::is_directory(current_dir)) {
+                for (const auto& entry : filesystem::directory_iterator(current_dir)) {
+                    string filename = entry.path().filename().string();
+                    
+                    // Match file prefix against text parameter
+                    if (filename.compare(0, len, text) == 0) {
+                        if (filesystem::is_regular_file(entry.status())) {
+                            file_matches.push_back(filename);
+                        }
+                    }
+                }
+            }
+        } catch (...) {}
+    }
+
+    if (file_index < file_matches.size()) {
+        const string& match_str = file_matches[file_index++];
+        char* match = (char*)malloc(match_str.length() + 1);
+        strcpy(match, match_str.c_str());
+        return match;
+    }
+
     return nullptr;
 }
 
 // Custom completion bridge function hooked into readline's completion engine
 char** shell_completion(const char* text, int start, int end) {
-    // Disable readline's default behavior of falling back to filename completion 
     rl_attempted_completion_over = 1;
 
-    // We only want to autocomplete the first token (the command itself)
     if (start == 0) {
+        // Autocomplete the primary command
         return rl_completion_matches(text, command_generator);
+    } else {
+        // Autocomplete standard argument filenames in the current working directory
+        return rl_completion_matches(text, filename_generator);
     }
-    
-    return nullptr;
 }
 
 // Parses the command line string handling single quotes, double quotes, and backslashes contextually.
@@ -184,7 +210,6 @@ int main() {
     rl_attempted_completion_function = shell_completion;
 
     while (true) {
-        // Use readline instead of raw cout/getline to accept input and track tabs
         char* input_raw = readline("$ ");
         
         if (!input_raw) {

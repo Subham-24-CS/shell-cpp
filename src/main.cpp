@@ -17,8 +17,8 @@
 
 using namespace std;
 
-// List of builtins we want to support autocomplete for
-const vector<string> builtins = {"echo", "exit"};
+// List of builtins we want to support autocomplete for (added complete here)
+const vector<string> builtins = {"echo", "exit", "complete"};
 
 // Custom completion generator function called repeatedly by readline for COMMANDS.
 char* command_generator(const char* text, int state) {
@@ -132,20 +132,17 @@ char* filename_generator(const char* text, int state) {
 
 // Custom display hook used to print out matches sequentially on a new line when multiple are found.
 void display_completion_matches(char** matches, int num_matches, int max_length) {
-    // Collect all candidates into a string vector for sorting and checking
     vector<string> items;
     for (int i = 1; i <= num_matches; ++i) {
         items.push_back(string(matches[i]));
     }
     
-    // Sort alphabetically as requested
     sort(items.begin(), items.end());
 
     cout << endl;
     for (size_t i = 0; i < items.size(); ++i) {
         string display_name = items[i];
         
-        // Add trailing slash to display visualization if it resolves to a folder
         if (filesystem::exists(display_name) && filesystem::is_directory(display_name)) {
             if (display_name.back() != '/') {
                 display_name += "/";
@@ -154,12 +151,11 @@ void display_completion_matches(char** matches, int num_matches, int max_length)
         
         cout << display_name;
         if (i + 1 < items.size()) {
-            cout << "  "; // Delimit with two spaces
+            cout << "  "; 
         }
     }
     cout << endl;
 
-    // Force Readline to redraw the input buffer line safely below our output listing
     rl_forced_update_display();
 }
 
@@ -167,17 +163,14 @@ void display_completion_matches(char** matches, int num_matches, int max_length)
 char** shell_completion(const char* text, int start, int end) {
     rl_attempted_completion_over = 1;
 
-    // Set configuration append configurations dynamically per invocation loop instance
     rl_completion_append_character = ' '; 
     rl_completion_suppress_append = 0;
 
     if (start == 0) {
         return rl_completion_matches(text, command_generator);
     } else {
-        // Intercept single or multiple match results to configure dynamic append parameters
         char** matches = rl_completion_matches(text, filename_generator);
         if (matches && matches[0] && !matches[1]) {
-            // If it's a unique single match, inspect if it's a folder to change the trailing behavior
             string match_str(matches[0]);
             if (filesystem::exists(match_str) && filesystem::is_directory(match_str)) {
                 rl_completion_append_character = '/';
@@ -385,6 +378,10 @@ int main() {
             }
             cout << endl;
         }
+        else if (cmd == "complete") {
+            // Placeholder execution logic for this stage
+            // We just absorb it silently since execution logic isn't tested yet
+        }
         else if (cmd == "type") {
             if (clean_args.size() < 2) {
                 if (redirect_output) cout.rdbuf(old_cout);
@@ -393,7 +390,8 @@ int main() {
             }
             string com = clean_args[1];
             
-            if (com == "exit" || com == "type" || com == "echo" || com == "pwd" || com == "cd") {
+            // Added "complete" to the shell builtin detection check branch
+            if (com == "exit" || com == "type" || com == "echo" || com == "pwd" || com == "cd" || com == "complete") {
                 cout << com << " is a shell builtin" << endl;
             }
             else {

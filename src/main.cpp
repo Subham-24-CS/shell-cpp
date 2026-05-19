@@ -107,9 +107,10 @@ int main() {
 
         // Flags and file targets for stdout and stderr redirections
         bool redirect_output = false;
-        bool append_output = false; // Flag specifically for >> and 1>>
+        bool append_output = false; 
         string redirect_file = "";
         bool redirect_error = false;
+        bool append_error = false; // Flag specifically for 2>>
         string error_file = "";
         vector<string> clean_args;
 
@@ -126,6 +127,12 @@ int main() {
                 i++; 
             } else if (args[i] == "2>" && (i + 1 < args.size())) {
                 redirect_error = true;
+                append_error = false;
+                error_file = args[i + 1];
+                i++; 
+            } else if (args[i] == "2>>" && (i + 1 < args.size())) {
+                redirect_error = true;
+                append_error = true;
                 error_file = args[i + 1];
                 i++; 
             } else {
@@ -156,7 +163,11 @@ int main() {
         streambuf* old_cerr = cerr.rdbuf();
         ofstream err_file;
         if (redirect_error) {
-            err_file.open(error_file, ios::out | ios::trunc);
+            if (append_error) {
+                err_file.open(error_file, ios::out | ios::app);
+            } else {
+                err_file.open(error_file, ios::out | ios::trunc);
+            }
             if (err_file.is_open()) {
                 cerr.rdbuf(err_file.rdbuf());
             }
@@ -266,7 +277,13 @@ int main() {
                     }
                     // Child standard error redirection
                     if (redirect_error) {
-                        int fd_err = open(error_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                        int flags = O_WRONLY | O_CREAT;
+                        if (append_error) {
+                            flags |= O_APPEND;
+                        } else {
+                            flags |= O_TRUNC;
+                        }
+                        int fd_err = open(error_file.c_str(), flags, 0644);
                         if (fd_err != -1) {
                             dup2(fd_err, STDERR_FILENO);
                             close(fd_err);

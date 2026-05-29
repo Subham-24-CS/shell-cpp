@@ -152,6 +152,10 @@ char* programmable_generator(const char* text, int state) {
         if (programmable_completions.count(base_cmd)) {
             string script_path = programmable_completions[base_cmd];
 
+            // Capture state parameters for target context injection variables
+            string comp_line_val = current_line;
+            string comp_point_val = to_string(rl_point);
+
             // Determine context arguments: argv[2] (current) and argv[3] (previous)
             string current_word = string(text);
             string prev_word = "";
@@ -197,6 +201,10 @@ char* programmable_generator(const char* text, int state) {
                     close(pipe_fds[0]);
                     dup2(pipe_fds[1], STDOUT_FILENO);
                     close(pipe_fds[1]);
+
+                    // Set environment variables context exclusively for this isolated child scope
+                    setenv("COMP_LINE", comp_line_val.c_str(), 1);
+                    setenv("COMP_POINT", comp_point_val.c_str(), 1);
 
                     char* c_script = const_cast<char*>(script_path.c_str());
                     char* c_arg1 = const_cast<char*>(base_cmd.c_str());

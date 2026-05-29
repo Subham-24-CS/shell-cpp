@@ -12,6 +12,7 @@
 #include <map>
 #include <algorithm>
 #include <cstring>
+#include <iomanip>
 
 // Include Readline headers
 #include <readline/readline.h>
@@ -19,14 +20,23 @@
 
 using namespace std;
 
+// Structure to track individual background job metrics
+struct BackgroundJob {
+    int job_id;
+    pid_t pid;
+    string command;
+    string status;
+};
+
 // List of builtins we want to support autocomplete for
 const vector<string> builtins = {"echo", "exit", "complete", "jobs"};
 
 // Global registry for programmable completions: maps a command name to its completer script path
 map<string, string> programmable_completions;
 
-// Global background job sequence tracker
+// Global tracking infrastructure for active background jobs
 int job_counter = 0;
+vector<BackgroundJob> background_jobs;
 
 // Custom completion generator function called repeatedly by readline for COMMANDS.
 char* command_generator(const char* text, int state) {
@@ -468,6 +478,18 @@ int main() {
             continue;
         }
 
+        // Reconstruct the full string command value representation for reporting
+        string full_cmd_string = "";
+        for (size_t i = 0; i < clean_args.size(); ++i) {
+            full_cmd_string += clean_args[i];
+            if (i + 1 < clean_args.size()) {
+                full_cmd_string += " ";
+            }
+        }
+        if (run_in_background) {
+            full_cmd_string += " &";
+        }
+
         string cmd = clean_args[0];
 
         // Setup stream redirection buffers for builtins
@@ -527,7 +549,11 @@ int main() {
             cout << endl;
         }
         else if (cmd == "jobs") {
-            // Empty implementation for this stage. Leaves stdout blank.
+            for (const auto& job : background_jobs) {
+                cout << "[" << job.job_id << "]+  " 
+                     << left << setw(24) << job.status 
+                     << job.command << endl;
+            }
         }
         else if (cmd == "complete") {
             if (clean_args.size() >= 3 && clean_args[1] == "-p") {
@@ -643,6 +669,14 @@ int main() {
                     if (run_in_background) {
                         job_counter++;
                         cout << "[" << job_counter << "] " << pid << endl;
+                        
+                        // Register background job metrics securely
+                        BackgroundJob new_job;
+                        new_job.job_id = job_counter;
+                        new_job.pid = pid;
+                        new_job.command = full_cmd_string;
+                        new_job.status = "Running";
+                        background_jobs.push_back(new_job);
                     } else {
                         waitpid(pid, nullptr, 0);
                     }

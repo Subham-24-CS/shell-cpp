@@ -549,6 +549,21 @@ int main() {
             cout << endl;
         }
         else if (cmd == "jobs") {
+            // Check process states non-blockingly to reap finished background executions
+            for (auto& job : background_jobs) {
+                if (job.status == "Running") {
+                    int status;
+                    pid_t res = waitpid(job.pid, &status, WNOHANG);
+                    if (res > 0 && WIFEXITED(status)) {
+                        job.status = "Done";
+                        // Drop trailing ampersand token notation if present on final report lines
+                        if (job.command.size() >= 2 && job.command.substr(job.command.size() - 2) == " &") {
+                            job.command = job.command.substr(0, job.command.size() - 2);
+                        }
+                    }
+                }
+            }
+
             size_t total_jobs = background_jobs.size();
             for (size_t i = 0; i < total_jobs; ++i) {
                 char marker = ' ';
@@ -562,6 +577,13 @@ int main() {
                      << left << setw(24) << background_jobs[i].status 
                      << background_jobs[i].command << endl;
             }
+
+            // Clean up all gathered structural data records registered with a Done status
+            background_jobs.erase(
+                remove_if(background_jobs.begin(), background_jobs.end(), 
+                          [](const BackgroundJob& j) { return j.status == "Done"; }), 
+                background_jobs.end()
+            );
         }
         else if (cmd == "complete") {
             if (clean_args.size() >= 3 && clean_args[1] == "-p") {

@@ -188,11 +188,6 @@ char* programmable_generator(const char* text, int state) {
                 }
             }
 
-            // Ensure we do not use the base command itself as the preceding argument context
-            if (prev_word == base_cmd) {
-                prev_word = "";
-            }
-
             int pipe_fds[2];
             if (pipe(pipe_fds) == 0) {
                 pid_t pid = fork();

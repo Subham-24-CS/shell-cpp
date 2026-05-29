@@ -38,44 +38,47 @@ map<string, string> programmable_completions;
 vector<BackgroundJob> background_jobs;
 
 // Non-blocking loop iteration worker to check for exited jobs
-void reap_background_jobs(bool print_inline) {
-    size_t total_jobs = background_jobs.size();
-    
-    for (size_t i = 0; i < total_jobs; ++i) {
+void reap_background_jobs() {
+    for (size_t i = 0; i < background_jobs.size(); ++i) {
         if (background_jobs[i].status == "Running") {
             int status;
             pid_t res = waitpid(background_jobs[i].pid, &status, WNOHANG);
-            if (res > 0 && WIFEXITED(status)) {
+            if (res > 0) {
                 background_jobs[i].status = "Done";
-                
                 // Drop trailing ampersand token notation if present on final report lines
                 if (background_jobs[i].command.size() >= 2 && 
                     background_jobs[i].command.substr(background_jobs[i].command.size() - 2) == " &") {
                     background_jobs[i].command = background_jobs[i].command.substr(0, background_jobs[i].command.size() - 2);
                 }
-
-                // Only print immediately if we are automatic reaping BEFORE a prompt.
-                if (print_inline) {
-                    char marker = ' ';
-                    if (i == total_jobs - 1) marker = '+';
-                    else if (i == total_jobs - 2) marker = '-';
-
-                    cout << "[" << background_jobs[i].job_id << "]" << marker << "  " 
-                         << left << setw(24) << background_jobs[i].status 
-                         << background_jobs[i].command << endl;
-                }
             }
         }
     }
+}
 
-    // If we printed them inline before a prompt, erase them now.
-    if (print_inline) {
-        background_jobs.erase(
-            remove_if(background_jobs.begin(), background_jobs.end(), 
-                      [](const BackgroundJob& j) { return j.status == "Done"; }), 
-            background_jobs.end()
-        );
+// Helper to update current markers (+/-) and output the jobs correctly sorted
+void display_jobs_list() {
+    // Sort background jobs strictly by Job ID
+    sort(background_jobs.begin(), background_jobs.end(), [](const BackgroundJob& a, const BackgroundJob& b) {
+        return a.job_id < b.job_id;
+    });
+
+    size_t total_jobs = background_jobs.size();
+    for (size_t i = 0; i < total_jobs; ++i) {
+        char marker = ' ';
+        if (i == total_jobs - 1) marker = '+';
+        else if (i == total_jobs - 2) marker = '-';
+
+        cout << "[" << background_jobs[i].job_id << "]" << marker << "  " 
+             << left << setw(24) << background_jobs[i].status 
+             << background_jobs[i].command << endl;
     }
+
+    // Clean up finished jobs after they have been reported
+    background_jobs.erase(
+        remove_if(background_jobs.begin(), background_jobs.end(), 
+                  [](const BackgroundJob& j) { return j.status == "Done"; }), 
+        background_jobs.end()
+    );
 }
 
 // Helper function to handle executing builtins anywhere (main shell or inside pipe forks)
@@ -109,22 +112,8 @@ bool execute_builtin(const string& cmd, const vector<string>& clean_args, bool &
         return true;
     }
     else if (cmd == "jobs") {
-        reap_background_jobs(false);
-        size_t total_jobs = background_jobs.size();
-        for (size_t i = 0; i < total_jobs; ++i) {
-            char marker = ' ';
-            if (i == total_jobs - 1) marker = '+';
-            else if (i == total_jobs - 2) marker = '-';
-
-            cout << "[" << background_jobs[i].job_id << "]" << marker << "  " 
-                 << left << setw(24) << background_jobs[i].status 
-                 << background_jobs[i].command << endl;
-        }
-        background_jobs.erase(
-            remove_if(background_jobs.begin(), background_jobs.end(), 
-                      [](const BackgroundJob& j) { return j.status == "Done"; }), 
-            background_jobs.end()
-        );
+        reap_background_jobs();
+        display_jobs_list();
         return true;
     }
     else if (cmd == "complete") {
@@ -595,8 +584,8 @@ int main() {
     rl_completion_display_matches_hook = display_completion_matches;
 
     while (true) {
-        // Automatic reaping cycle checkpoint directly preceding the visual prompt invocation
-        reap_background_jobs(true);
+        // Run a state sync iteration cycle directly preceding the prompt invocation
+        reap_background_jobs();
 
         char* input_raw = readline("$ ");
         
@@ -777,9 +766,6 @@ int main() {
                 new_job.status = "Running";
 
                 background_jobs.push_back(new_job);
-                sort(background_jobs.begin(), background_jobs.end(), [](const BackgroundJob& a, const BackgroundJob& b) {
-                    return a.job_id < b.job_id;
-                });
             } else {
                 for (pid_t p : child_pids) {
                     waitpid(p, nullptr, 0);
@@ -864,9 +850,6 @@ int main() {
                         new_job.status = "Running";
                         
                         background_jobs.push_back(new_job);
-                        sort(background_jobs.begin(), background_jobs.end(), [](const BackgroundJob& a, const BackgroundJob& b) {
-                            return a.job_id < b.job_id;
-                        });
                     } else {
                         waitpid(pid, nullptr, 0);
                     }

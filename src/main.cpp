@@ -522,6 +522,10 @@ int main() {
                     cout << "complete: " << target_cmd << ": no completion specification" << endl;
                 }
             } 
+            else if (clean_args.size() >= 3 && clean_args[1] == "-r") {
+                string target_cmd = clean_args[2];
+                programmable_completions.erase(target_cmd);
+            }
             else if (clean_args.size() >= 4 && clean_args[1] == "-C") {
                 string script_path = clean_args[2];
                 string target_cmd = clean_args[3];

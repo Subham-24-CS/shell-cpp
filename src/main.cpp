@@ -188,6 +188,21 @@ bool execute_builtin(const string& cmd, const vector<string>& clean_args, bool &
             }
             return true;
         }
+        // Support writing memory history to file via: history -w <path>
+        else if (clean_args.size() > 2 && clean_args[1] == "-w") {
+            string history_file_path = clean_args[2];
+            ofstream hist_file(history_file_path, ios::out | ios::trunc);
+            if (hist_file.is_open()) {
+                for (int i = 0; i < history_length; ++i) {
+                    HIST_ENTRY* entry = history_get(i + history_base);
+                    if (entry) {
+                        hist_file << entry->line << "\n";
+                    }
+                }
+                hist_file.close();
+            }
+            return true;
+        }
 
         int start_idx = 0;
         

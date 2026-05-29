@@ -29,7 +29,7 @@ struct BackgroundJob {
 };
 
 // List of builtins we want to support autocomplete and classification for
-const vector<string> builtins = {"echo", "exit", "complete", "jobs", "pwd", "cd", "type", "history"};
+const vector<string> builtins = {"echo", "exit", "complete", "jobs", "pwd", "cd", "type", "history", "declare"};
 
 // Global registry for programmable completions: maps a command name to its completer script path
 map<string, string> programmable_completions;
@@ -189,6 +189,10 @@ bool execute_builtin(const string& cmd, const vector<string>& clean_args, bool &
             string target_cmd = clean_args[3];
             programmable_completions[target_cmd] = script_path;
         }
+        return true;
+    }
+    else if (cmd == "declare") {
+        // Behavioral features will be implemented in later stages.
         return true;
     }
     else if (cmd == "type") {

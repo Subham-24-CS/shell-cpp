@@ -192,7 +192,9 @@ bool execute_builtin(const string& cmd, const vector<string>& clean_args, bool &
         return true;
     }
     else if (cmd == "declare") {
-        // Behavioral features will be implemented in later stages.
+        if (clean_args.size() >= 3 && clean_args[1] == "-p") {
+            cout << "declare: " << clean_args[2] << ": not found" << endl;
+        }
         return true;
     }
     else if (cmd == "type") {

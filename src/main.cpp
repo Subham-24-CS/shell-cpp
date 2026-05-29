@@ -210,7 +210,6 @@ bool execute_builtin(const string& cmd, const vector<string>& clean_args, bool &
                     }
                 }
                 hist_file.close();
-                // Update the checkpoint count to avoid rewriting these items on next call
                 history_appended_count = history_length;
             }
             return true;
@@ -227,7 +226,6 @@ bool execute_builtin(const string& cmd, const vector<string>& clean_args, bool &
                     }
                 }
                 hist_file.close();
-                // Initialize the counter so that pre-existing file entries aren't processed by -a
                 history_appended_count = history_length;
             }
             return true;
@@ -620,7 +618,23 @@ int main() {
     rl_attempted_completion_function = shell_completion;
     rl_completion_display_matches_hook = display_completion_matches;
 
-    // Synchronize tracker count if history gets loaded initially
+    // Load initial history from HISTFILE environment variable if set on program startup
+    char* histfile_env = getenv("HISTFILE");
+    if (histfile_env) {
+        string path(histfile_env);
+        ifstream hist_file(path);
+        if (hist_file.is_open()) {
+            string line;
+            while (getline(hist_file, line)) {
+                if (!line.empty()) {
+                    add_history(line.c_str());
+                }
+            }
+            hist_file.close();
+        }
+    }
+
+    // Synchronize tracker checkpoint count post initialization load
     history_appended_count = history_length;
 
     while (true) {
@@ -639,7 +653,7 @@ int main() {
             continue;
         }
 
-        // Commit all entries immediately to history memory so the current command can be captured by -a
+        // Commit all entries immediately to history memory so the current command can be captured
         add_history(command_line.c_str());
 
         vector<string> args = parse_arguments(command_line);

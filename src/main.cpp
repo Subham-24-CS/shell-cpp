@@ -38,11 +38,10 @@ map<string, string> programmable_completions;
 int job_counter = 0;
 vector<BackgroundJob> background_jobs;
 
-// Non-blocking loop iteration worker to check for exited jobs, report them, and clear them out.
-void reap_background_jobs() {
+// Non-blocking loop iteration worker to check for exited jobs
+void reap_background_jobs(bool print_inline) {
     size_t total_jobs = background_jobs.size();
     
-    // Step 1: Evaluate state adjustments via non-blocking polling
     for (size_t i = 0; i < total_jobs; ++i) {
         if (background_jobs[i].status == "Running") {
             int status;
@@ -56,27 +55,28 @@ void reap_background_jobs() {
                     background_jobs[i].command = background_jobs[i].command.substr(0, background_jobs[i].command.size() - 2);
                 }
 
-                // Step 2: Compute current local relational markers contextually right before emitting text
-                char marker = ' ';
-                if (i == total_jobs - 1) {
-                    marker = '+';
-                } else if (i == total_jobs - 2) {
-                    marker = '-';
-                }
+                // Only print immediately if we are automatic reaping BEFORE a prompt.
+                if (print_inline) {
+                    char marker = ' ';
+                    if (i == total_jobs - 1) marker = '+';
+                    else if (i == total_jobs - 2) marker = '-';
 
-                cout << "[" << background_jobs[i].job_id << "]" << marker << "  " 
-                     << left << setw(24) << background_jobs[i].status 
-                     << background_jobs[i].command << endl;
+                    cout << "[" << background_jobs[i].job_id << "]" << marker << "  " 
+                         << left << setw(24) << background_jobs[i].status 
+                         << background_jobs[i].command << endl;
+                }
             }
         }
     }
 
-    // Step 3: Remove all reaped entries securely from the global container
-    background_jobs.erase(
-        remove_if(background_jobs.begin(), background_jobs.end(), 
-                  [](const BackgroundJob& j) { return j.status == "Done"; }), 
-        background_jobs.end()
-    );
+    // If we printed them inline before a prompt, erase them now.
+    if (print_inline) {
+        background_jobs.erase(
+            remove_if(background_jobs.begin(), background_jobs.end(), 
+                      [](const BackgroundJob& j) { return j.status == "Done"; }), 
+            background_jobs.end()
+        );
+    }
 }
 
 // Custom completion generator function called repeatedly by readline for COMMANDS.
@@ -214,31 +214,24 @@ char* programmable_generator(const char* text, int state) {
             string current_word = string(text);
             string prev_word = "";
 
-            // Parse the line up to the current completion token position to isolate the previous word
-            string partial_line = current_line.substr(0, rl_point);
-            // Trim tracking trailing whitespaces if any to locate the preceding token safely
-            size_t end_pos = partial_line.find_last_not_of(" \t");
-            if (end_pos != string::npos) {
-                partial_line = partial_line.substr(0, end_pos + 1);
-                // If the current word isn't empty, peel it off to find the word before it
-                if (!current_word.empty()) {
-                    size_t word_start = partial_line.find_last_of(" \t");
-                    if (word_start != string::npos) {
-                        partial_line = partial_line.substr(0, word_start);
-                    } else {
-                        partial_line = ""; // No word before this one
-                    }
+            // Robust token splitting up to the current cursor position
+            string current_line_up_to_point = string(rl_line_buffer).substr(0, rl_point);
+            vector<string> words_before_cursor;
+            stringstream line_ss(current_line_up_to_point);
+            string temp_word;
+
+            while (line_ss >> temp_word) {
+                words_before_cursor.push_back(temp_word);
+            }
+
+            // Calculate previous word depending on if the user started writing the token or not
+            if (!current_word.empty()) {
+                if (words_before_cursor.size() >= 2) {
+                    prev_word = words_before_cursor[words_before_cursor.size() - 2];
                 }
-                // Extract the final leftover token as our argv[3] previous word
-                size_t prev_start = partial_line.find_last_not_of(" \t");
-                if (prev_start != string::npos) {
-                    partial_line = partial_line.substr(0, prev_start + 1);
-                    size_t last_space = partial_line.find_last_of(" \t");
-                    if (last_space != string::npos) {
-                        prev_word = partial_line.substr(last_space + 1);
-                    } else {
-                        prev_word = partial_line;
-                    }
+            } else {
+                if (!words_before_cursor.empty()) {
+                    prev_word = words_before_cursor.back();
                 }
             }
 
@@ -452,7 +445,7 @@ int main() {
 
     while (true) {
         // Automatic reaping cycle checkpoint directly preceding the visual prompt invocation
-        reap_background_jobs();
+        reap_background_jobs(true);
 
         char* input_raw = readline("$ ");
         
@@ -593,8 +586,8 @@ int main() {
             cout << endl;
         }
         else if (cmd == "jobs") {
-            // First run reaping on active tasks before drawing the table list interface
-            reap_background_jobs();
+            // Update jobs data securely without emitting inline prints
+            reap_background_jobs(false);
 
             size_t total_jobs = background_jobs.size();
             for (size_t i = 0; i < total_jobs; ++i) {
@@ -609,6 +602,13 @@ int main() {
                      << left << setw(24) << background_jobs[i].status 
                      << background_jobs[i].command << endl;
             }
+
+            // Remove Done records from the table after displaying them uniformly
+            background_jobs.erase(
+                remove_if(background_jobs.begin(), background_jobs.end(), 
+                          [](const BackgroundJob& j) { return j.status == "Done"; }), 
+                background_jobs.end()
+            );
         }
         else if (cmd == "complete") {
             if (clean_args.size() >= 3 && clean_args[1] == "-p") {

@@ -40,6 +40,24 @@ vector<BackgroundJob> background_jobs;
 // Tracks how many memory history entries have already been appended to the file
 int history_appended_count = 0;
 
+// Helper to write the complete in-memory history to the file specified by HISTFILE
+void save_history_to_histfile() {
+    char* histfile_env = getenv("HISTFILE");
+    if (histfile_env) {
+        string path(histfile_env);
+        ofstream hist_file(path, ios::out | ios::trunc);
+        if (hist_file.is_open()) {
+            for (int i = 0; i < history_length; ++i) {
+                HIST_ENTRY* entry = history_get(i + history_base);
+                if (entry) {
+                    hist_file << entry->line << "\n";
+                }
+            }
+            hist_file.close();
+        }
+    }
+}
+
 // Helper to determine the correct job control markers (+ / - / ' ') purely based on ID sorting
 char determine_job_marker(size_t index, size_t total_jobs) {
     if (total_jobs == 0) return ' ';
@@ -643,6 +661,8 @@ int main() {
         char* input_raw = readline("$ ");
         
         if (!input_raw) {
+            // Implicit EOF / Ctrl+D exit strategy handler
+            save_history_to_histfile();
             break; 
         }
 
@@ -841,6 +861,8 @@ int main() {
             if (should_exit) {
                 cout.rdbuf(old_cout);
                 cerr.rdbuf(old_cerr);
+                // Explicit command exit strategy handler
+                save_history_to_histfile();
                 break;
             }
         } else {

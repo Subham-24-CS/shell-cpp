@@ -28,8 +28,8 @@ struct BackgroundJob {
     string status;
 };
 
-// List of builtins we want to support autocomplete for
-const vector<string> builtins = {"echo", "exit", "complete", "jobs", "pwd", "cd", "type"};
+// List of builtins we want to support autocomplete and classification for
+const vector<string> builtins = {"echo", "exit", "complete", "jobs", "pwd", "cd", "type", "history"};
 
 // Global registry for programmable completions: maps a command name to its completer script path
 map<string, string> programmable_completions;
@@ -169,6 +169,16 @@ bool execute_builtin(const string& cmd, const vector<string>& clean_args, bool &
                 }
             }
             if (!found) cout << com << ": not found" << endl;
+        }
+        return true;
+    }
+    else if (cmd == "history") {
+        // Iterate through all tracked entries in the global Readline history array
+        for (int i = 0; i < history_length; ++i) {
+            HIST_ENTRY* entry = history_get(i + history_base);
+            if (entry) {
+                cout << setw(5) << (i + 1) << "  " << entry->line << endl;
+            }
         }
         return true;
     }
@@ -556,6 +566,9 @@ int main() {
             continue;
         }
 
+        // Explicitly record non-empty strings into the underlying history engine
+        add_history(command_line.c_str());
+
         vector<string> args = parse_arguments(command_line);
         if (args.empty()) {
             continue;
@@ -651,7 +664,6 @@ int main() {
 
             for (size_t i = 0; i < num_cmds; ++i) {
                 int pipe_fds[2];
-                // Create a pipe for all except the absolute last stage command
                 if (i < num_cmds - 1) {
                     if (pipe(pipe_fds) < 0) {
                         perror("pipe");
@@ -661,34 +673,25 @@ int main() {
 
                 pid_t pid = fork();
                 if (pid == 0) {
-                    // Route input from previous stage (if any)
                     if (infile_fd != STDIN_FILENO) {
                         dup2(infile_fd, STDIN_FILENO);
                         close(infile_fd);
                     }
 
-                    // Route output to next stage (if any)
                     if (i < num_cmds - 1) {
                         dup2(pipe_fds[1], STDOUT_FILENO);
                         close(pipe_fds[0]);
                         close(pipe_fds[1]);
                     } else {
-                        // Final stage command respects master file redirections
                         if (redirect_output) {
                             int flags = O_WRONLY | O_CREAT | (append_output ? O_APPEND : O_TRUNC);
                             int fd_out = open(redirect_file.c_str(), flags, 0644);
-                            if (fd_out != -1) {
-                                dup2(fd_out, STDOUT_FILENO);
-                                close(fd_out);
-                            }
+                            if (fd_out != -1) { dup2(fd_out, STDOUT_FILENO); close(fd_out); }
                         }
                         if (redirect_error) {
                             int flags = O_WRONLY | O_CREAT | (append_error ? O_APPEND : O_TRUNC);
                             int fd_err = open(error_file.c_str(), flags, 0644);
-                            if (fd_err != -1) {
-                                dup2(fd_err, STDERR_FILENO);
-                                close(fd_err);
-                            }
+                            if (fd_err != -1) { dup2(fd_err, STDERR_FILENO); close(fd_err); }
                         }
                     }
 
@@ -703,26 +706,22 @@ int main() {
                 } else if (pid > 0) {
                     child_pids.push_back(pid);
                     
-                    // Clean up parent side files to avoid running out of descriptors or blocking streams
                     if (infile_fd != STDIN_FILENO) {
                         close(infile_fd);
                     }
                     if (i < num_cmds - 1) {
                         close(pipe_fds[1]);
-                        infile_fd = pipe_fds[0]; // Next command reads from here
+                        infile_fd = pipe_fds[0];
                     }
                 }
             }
 
             if (run_in_background) {
                 set<int> active_ids;
-                for (const auto& job : background_jobs) {
-                    active_ids.insert(job.job_id);
-                }
+                for (const auto& job : background_jobs) active_ids.insert(job.job_id);
                 int assigned_id = 1;
                 while (active_ids.count(assigned_id)) assigned_id++;
 
-                // Track final pipeline sink command process
                 pid_t monitored_pid = child_pids.empty() ? -1 : child_pids.back();
                 cout << "[" << assigned_id << "] " << monitored_pid << endl;
 
@@ -737,7 +736,6 @@ int main() {
                     return a.job_id < b.job_id;
                 });
             } else {
-                // Synchronously wait for every process in the pipeline chain to yield
                 for (pid_t p : child_pids) {
                     waitpid(p, nullptr, 0);
                 }

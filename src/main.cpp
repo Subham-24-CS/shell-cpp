@@ -25,6 +25,9 @@ const vector<string> builtins = {"echo", "exit", "complete", "jobs"};
 // Global registry for programmable completions: maps a command name to its completer script path
 map<string, string> programmable_completions;
 
+// Global background job sequence tracker
+int job_counter = 0;
+
 // Custom completion generator function called repeatedly by readline for COMMANDS.
 char* command_generator(const char* text, int state) {
     static vector<string> current_matches;
@@ -454,6 +457,17 @@ int main() {
             continue;
         }
 
+        // Check if the command should be run in the background
+        bool run_in_background = false;
+        if (clean_args.back() == "&") {
+            run_in_background = true;
+            clean_args.pop_back();
+        }
+
+        if (clean_args.empty()) {
+            continue;
+        }
+
         string cmd = clean_args[0];
 
         // Setup stream redirection buffers for builtins
@@ -626,7 +640,12 @@ int main() {
                     exit(1); 
                 } else {
                     // Parent process
-                    waitpid(pid, nullptr, 0);
+                    if (run_in_background) {
+                        job_counter++;
+                        cout << "[" << job_counter << "] " << pid << endl;
+                    } else {
+                        waitpid(pid, nullptr, 0);
+                    }
                 }
             } else {
                 cout << cmd << ": command not found" << endl;

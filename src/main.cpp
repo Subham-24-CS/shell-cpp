@@ -37,6 +37,9 @@ map<string, string> programmable_completions;
 // Global tracking infrastructure for active background jobs
 vector<BackgroundJob> background_jobs;
 
+// Tracks how many memory history entries have already been appended to the file
+int history_appended_count = 0;
+
 // Helper to determine the correct job control markers (+ / - / ' ') purely based on ID sorting
 char determine_job_marker(size_t index, size_t total_jobs) {
     if (total_jobs == 0) return ' ';
@@ -47,14 +50,12 @@ char determine_job_marker(size_t index, size_t total_jobs) {
 
 // Scans and automatically alerts the user about completed processes right before a new prompt is drawn
 void monitor_and_notify_background_jobs() {
-    // 1. Sync actual process states with non-blocking OS queries
     for (auto& job : background_jobs) {
         if (job.status == "Running") {
             int status;
             pid_t res = waitpid(job.pid, &status, WNOHANG);
             if (res > 0) {
                 job.status = "Done";
-                // Strip the trailing background ampersand context notation safely
                 if (job.command.size() >= 2 && job.command.substr(job.command.size() - 2) == " &") {
                     job.command = job.command.substr(0, job.command.size() - 2);
                 }
@@ -62,12 +63,10 @@ void monitor_and_notify_background_jobs() {
         }
     }
 
-    // 2. Ensure jobs are perfectly sorted by Job ID for uniform marker assignment
     sort(background_jobs.begin(), background_jobs.end(), [](const BackgroundJob& a, const BackgroundJob& b) {
         return a.job_id < b.job_id;
     });
 
-    // 3. Print notifications exclusively for background jobs that just completed
     size_t total_jobs = background_jobs.size();
     for (size_t i = 0; i < total_jobs; ++i) {
         if (background_jobs[i].status == "Done") {
@@ -78,7 +77,6 @@ void monitor_and_notify_background_jobs() {
         }
     }
 
-    // 4. Purge the completed jobs so they aren't notified or printed again
     background_jobs.erase(
         remove_if(background_jobs.begin(), background_jobs.end(), 
                   [](const BackgroundJob& j) { return j.status == "Done"; }), 
@@ -88,7 +86,6 @@ void monitor_and_notify_background_jobs() {
 
 // Explicit execution function when user prints background processes with the `jobs` builtin
 void print_active_jobs_builtin() {
-    // Final dynamic check for any instant transitions
     for (auto& job : background_jobs) {
         if (job.status == "Running") {
             int status;
@@ -102,7 +99,6 @@ void print_active_jobs_builtin() {
         }
     }
 
-    // Sort strictly by Job ID
     sort(background_jobs.begin(), background_jobs.end(), [](const BackgroundJob& a, const BackgroundJob& b) {
         return a.job_id < b.job_id;
     });
@@ -115,7 +111,6 @@ void print_active_jobs_builtin() {
              << background_jobs[i].command << endl;
     }
 
-    // Wiping the "Done" processes post-explicit request as per standard shell protocol
     background_jobs.erase(
         remove_if(background_jobs.begin(), background_jobs.end(), 
                   [](const BackgroundJob& j) { return j.status == "Done"; }), 
@@ -203,8 +198,25 @@ bool execute_builtin(const string& cmd, const vector<string>& clean_args, bool &
         return true;
     }
     else if (cmd == "history") {
+        // Support appending new unwritten lines via: history -a <path>
+        if (clean_args.size() > 2 && clean_args[1] == "-a") {
+            string history_file_path = clean_args[2];
+            ofstream hist_file(history_file_path, ios::out | ios::app);
+            if (hist_file.is_open()) {
+                for (int i = history_appended_count; i < history_length; ++i) {
+                    HIST_ENTRY* entry = history_get(i + history_base);
+                    if (entry) {
+                        hist_file << entry->line << "\n";
+                    }
+                }
+                hist_file.close();
+                // Update the checkpoint count to avoid rewriting these items on next call
+                history_appended_count = history_length;
+            }
+            return true;
+        }
         // Support reading history from file via: history -r <path>
-        if (clean_args.size() > 2 && clean_args[1] == "-r") {
+        else if (clean_args.size() > 2 && clean_args[1] == "-r") {
             string history_file_path = clean_args[2];
             ifstream hist_file(history_file_path);
             if (hist_file.is_open()) {
@@ -215,6 +227,8 @@ bool execute_builtin(const string& cmd, const vector<string>& clean_args, bool &
                     }
                 }
                 hist_file.close();
+                // Initialize the counter so that pre-existing file entries aren't processed by -a
+                history_appended_count = history_length;
             }
             return true;
         }
@@ -236,7 +250,6 @@ bool execute_builtin(const string& cmd, const vector<string>& clean_args, bool &
 
         int start_idx = 0;
         
-        // Handle optional numerical limit parameter to display only the last N entries
         if (clean_args.size() > 1) {
             try {
                 int limit = stoi(clean_args[1]);
@@ -244,7 +257,6 @@ bool execute_builtin(const string& cmd, const vector<string>& clean_args, bool &
                     start_idx = history_length - limit;
                 }
             } catch (...) {
-                // If the parameter is non-numeric, fallback gracefully to printing all history
                 start_idx = 0;
             }
         }
@@ -271,14 +283,12 @@ char* command_generator(const char* text, int state) {
         size_t len = strlen(text);
         set<string> unique_matches;
 
-        // 1. Check Builtins
         for (const string& cmd : builtins) {
             if (cmd.compare(0, len, text) == 0) {
                 unique_matches.insert(cmd);
             }
         }
 
-        // 2. Scan PATH for External Executables
         char* path_env = getenv("PATH");
         if (path_env) {
             stringstream ss_path(path_env);
@@ -387,15 +397,12 @@ char* programmable_generator(const char* text, int state) {
         if (programmable_completions.count(base_cmd)) {
             string script_path = programmable_completions[base_cmd];
 
-            // Capture state parameters for target context injection variables
             string comp_line_val = current_line;
             string comp_point_val = to_string(rl_point);
 
-            // Determine context arguments: argv[2] (current) and argv[3] (previous)
             string current_word = string(text);
             string prev_word = "";
 
-            // Robust token splitting up to the current cursor position
             string current_line_up_to_point = string(rl_line_buffer).substr(0, rl_point);
             vector<string> words_before_cursor;
             stringstream line_ss(current_line_up_to_point);
@@ -405,7 +412,6 @@ char* programmable_generator(const char* text, int state) {
                 words_before_cursor.push_back(temp_word);
             }
 
-            // Calculate previous word depending on if the user started writing the token or not
             if (!current_word.empty()) {
                 if (words_before_cursor.size() >= 2) {
                     prev_word = words_before_cursor[words_before_cursor.size() - 2];
@@ -420,12 +426,10 @@ char* programmable_generator(const char* text, int state) {
             if (pipe(pipe_fds) == 0) {
                 pid_t pid = fork();
                 if (pid == 0) {
-                    // Child process setup redirection
                     close(pipe_fds[0]);
                     dup2(pipe_fds[1], STDOUT_FILENO);
                     close(pipe_fds[1]);
 
-                    // Set environment variables context exclusively for this isolated child scope
                     setenv("COMP_LINE", comp_line_val.c_str(), 1);
                     setenv("COMP_POINT", comp_point_val.c_str(), 1);
 
@@ -438,7 +442,6 @@ char* programmable_generator(const char* text, int state) {
                     execv(c_script, c_args);
                     exit(1); 
                 } else if (pid > 0) {
-                    // Parent process reads output securely
                     close(pipe_fds[1]);
                     char buffer[1024];
                     string output = "";
@@ -450,12 +453,10 @@ char* programmable_generator(const char* text, int state) {
                     close(pipe_fds[0]);
                     waitpid(pid, nullptr, 0);
 
-                    // Parse all newline-separated completion lines returned by the script
                     if (!output.empty()) {
                         stringstream output_ss(output);
                         string line;
                         while (getline(output_ss, line)) {
-                            // Strip any trailing carriage returns if present
                             if (!line.empty() && line.back() == '\r') {
                                 line.pop_back();
                             }
@@ -469,7 +470,6 @@ char* programmable_generator(const char* text, int state) {
         }
     }
 
-    // Sequentially return every parsed match candidate line back to Readline
     if (programmable_index < programmable_matches.size()) {
         const string& match_str = programmable_matches[programmable_index++];
         char* match = (char*)malloc(match_str.length() + 1);
@@ -519,18 +519,15 @@ char** shell_completion(const char* text, int start, int end) {
     if (start == 0) {
         return rl_completion_matches(text, command_generator);
     } else {
-        // Step 1: Detect the active initial command typed on the line buffer
         string current_line(rl_line_buffer);
         stringstream ss(current_line);
         string base_cmd;
         ss >> base_cmd;
 
-        // Step 2: Check if a programmable completion is registered for this command
         if (programmable_completions.count(base_cmd)) {
             return rl_completion_matches(text, programmable_generator);
         }
 
-        // Fallback context: handle file/directory searches
         char** matches = rl_completion_matches(text, filename_generator);
         if (matches && matches[0] && !matches[1]) {
             string match_str(matches[0]);
@@ -620,12 +617,13 @@ int main() {
     cout << unitbuf;
     cerr << unitbuf;
 
-    // Register our custom tab completion hooks
     rl_attempted_completion_function = shell_completion;
     rl_completion_display_matches_hook = display_completion_matches;
 
+    // Synchronize tracker count if history gets loaded initially
+    history_appended_count = history_length;
+
     while (true) {
-        // Run state sync iteration cycle directly preceding prompt rendering
         monitor_and_notify_background_jobs();
 
         char* input_raw = readline("$ ");
@@ -641,7 +639,7 @@ int main() {
             continue;
         }
 
-        // Commit all parsed entries safely to history
+        // Commit all entries immediately to history memory so the current command can be captured by -a
         add_history(command_line.c_str());
 
         vector<string> args = parse_arguments(command_line);
@@ -649,7 +647,6 @@ int main() {
             continue;
         }
 
-        // Flags and file targets for stdout and stderr redirections
         bool redirect_output = false;
         bool append_output = false; 
         string redirect_file = "";
@@ -688,7 +685,6 @@ int main() {
             continue;
         }
 
-        // Check if the command should be run in the background
         bool run_in_background = false;
         if (clean_args.back() == "&") {
             run_in_background = true;
@@ -699,7 +695,6 @@ int main() {
             continue;
         }
 
-        // Reconstruct the full string command value representation for reporting
         string full_cmd_string = "";
         for (size_t i = 0; i < clean_args.size(); ++i) {
             full_cmd_string += clean_args[i];
@@ -713,10 +708,8 @@ int main() {
 
         string cmd = clean_args[0];
 
-        // Check for basic or multi-stage pipeline syntax (cmd1 | cmd2 | cmd3 ...)
         auto pipe_it = find(clean_args.begin(), clean_args.end(), "|");
         if (pipe_it != clean_args.end()) {
-            // Group segments separated by '|'
             vector<vector<string>> pipeline_cmds;
             vector<string> current_sub_cmd;
             for (const auto& token : clean_args) {
@@ -815,7 +808,6 @@ int main() {
             continue;
         }
 
-        // Setup sequential stream redirection buffers for foreground single commands/builtins
         streambuf* old_cout = cout.rdbuf();
         ofstream out_file;
         if (redirect_output) {
@@ -838,7 +830,6 @@ int main() {
                 break;
             }
         } else {
-            // Check for external commands in PATH
             bool found = false;
             string executable_path;
             char* path_env = getenv("PATH");
@@ -900,7 +891,6 @@ int main() {
             }
         }
 
-        // Restore stream targets for the next loop execution
         if (redirect_output) {
             cout.rdbuf(old_cout);
             out_file.close();

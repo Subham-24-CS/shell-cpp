@@ -144,7 +144,6 @@ char* programmable_generator(const char* text, int state) {
         completion_candidate = "";
         dynamic_match_found = false;
 
-        // Parse the first token of the line buffer to get the matching base command
         string current_line(rl_line_buffer);
         stringstream ss(current_line);
         string base_cmd;
@@ -152,6 +151,43 @@ char* programmable_generator(const char* text, int state) {
 
         if (programmable_completions.count(base_cmd)) {
             string script_path = programmable_completions[base_cmd];
+
+            // Determine context arguments: argv[2] (current) and argv[3] (previous)
+            string current_word = string(text);
+            string prev_word = "";
+
+            // Parse the line up to the current completion token position to isolate the previous word
+            string partial_line = current_line.substr(0, rl_point);
+            // Trim tracking trailing whitespaces if any to locate the preceding token safely
+            size_t end_pos = partial_line.find_last_not_of(" \t");
+            if (end_pos != string::npos) {
+                partial_line = partial_line.substr(0, end_pos + 1);
+                // If the current word isn't empty, peel it off to find the word before it
+                if (!current_word.empty()) {
+                    size_t word_start = partial_line.find_last_of(" \t");
+                    if (word_start != string::npos) {
+                        partial_line = partial_line.substr(0, word_start);
+                    } else {
+                        partial_line = ""; // No word before this one
+                    }
+                }
+                // Extract the final leftover token as our argv[3] previous word
+                size_t prev_start = partial_line.find_last_not_of(" \t");
+                if (prev_start != string::npos) {
+                    partial_line = partial_line.substr(0, prev_start + 1);
+                    size_t last_space = partial_line.find_last_of(" \t");
+                    if (last_space != string::npos) {
+                        prev_word = partial_line.substr(last_space + 1);
+                    } else {
+                        prev_word = partial_line;
+                    }
+                }
+            }
+
+            // Ensure we do not use the base command itself as the preceding argument context
+            if (prev_word == base_cmd) {
+                prev_word = "";
+            }
 
             int pipe_fds[2];
             if (pipe(pipe_fds) == 0) {
@@ -163,7 +199,11 @@ char* programmable_generator(const char* text, int state) {
                     close(pipe_fds[1]);
 
                     char* c_script = const_cast<char*>(script_path.c_str());
-                    char* c_args[] = {c_script, nullptr};
+                    char* c_arg1 = const_cast<char*>(base_cmd.c_str());
+                    char* c_arg2 = const_cast<char*>(current_word.c_str());
+                    char* c_arg3 = const_cast<char*>(prev_word.c_str());
+                    
+                    char* c_args[] = {c_script, c_arg1, c_arg2, c_arg3, nullptr};
                     execv(c_script, c_args);
                     exit(1); 
                 } else if (pid > 0) {

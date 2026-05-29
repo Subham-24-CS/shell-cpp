@@ -4,8 +4,6 @@
 # unless you really need them.
 debug: false
 
-# Use this to change the C++ version used to run your code
-# on Codecrafters.
-#
+
 # Available versions: cpp-23
 buildpack: cpp-23

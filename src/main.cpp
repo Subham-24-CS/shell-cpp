@@ -38,6 +38,47 @@ map<string, string> programmable_completions;
 int job_counter = 0;
 vector<BackgroundJob> background_jobs;
 
+// Non-blocking loop iteration worker to check for exited jobs, report them, and clear them out.
+void reap_background_jobs() {
+    size_t total_jobs = background_jobs.size();
+    
+    // Step 1: Evaluate state adjustments via non-blocking polling
+    for (size_t i = 0; i < total_jobs; ++i) {
+        if (background_jobs[i].status == "Running") {
+            int status;
+            pid_t res = waitpid(background_jobs[i].pid, &status, WNOHANG);
+            if (res > 0 && WIFEXITED(status)) {
+                background_jobs[i].status = "Done";
+                
+                // Drop trailing ampersand token notation if present on final report lines
+                if (background_jobs[i].command.size() >= 2 && 
+                    background_jobs[i].command.substr(background_jobs[i].command.size() - 2) == " &") {
+                    background_jobs[i].command = background_jobs[i].command.substr(0, background_jobs[i].command.size() - 2);
+                }
+
+                // Step 2: Compute current local relational markers contextually right before emitting text
+                char marker = ' ';
+                if (i == total_jobs - 1) {
+                    marker = '+';
+                } else if (i == total_jobs - 2) {
+                    marker = '-';
+                }
+
+                cout << "[" << background_jobs[i].job_id << "]" << marker << "  " 
+                     << left << setw(24) << background_jobs[i].status 
+                     << background_jobs[i].command << endl;
+            }
+        }
+    }
+
+    // Step 3: Remove all reaped entries securely from the global container
+    background_jobs.erase(
+        remove_if(background_jobs.begin(), background_jobs.end(), 
+                  [](const BackgroundJob& j) { return j.status == "Done"; }), 
+        background_jobs.end()
+    );
+}
+
 // Custom completion generator function called repeatedly by readline for COMMANDS.
 char* command_generator(const char* text, int state) {
     static vector<string> current_matches;
@@ -410,6 +451,9 @@ int main() {
     rl_completion_display_matches_hook = display_completion_matches;
 
     while (true) {
+        // Automatic reaping cycle checkpoint directly preceding the visual prompt invocation
+        reap_background_jobs();
+
         char* input_raw = readline("$ ");
         
         if (!input_raw) {
@@ -549,20 +593,8 @@ int main() {
             cout << endl;
         }
         else if (cmd == "jobs") {
-            // Check process states non-blockingly to reap finished background executions
-            for (auto& job : background_jobs) {
-                if (job.status == "Running") {
-                    int status;
-                    pid_t res = waitpid(job.pid, &status, WNOHANG);
-                    if (res > 0 && WIFEXITED(status)) {
-                        job.status = "Done";
-                        // Drop trailing ampersand token notation if present on final report lines
-                        if (job.command.size() >= 2 && job.command.substr(job.command.size() - 2) == " &") {
-                            job.command = job.command.substr(0, job.command.size() - 2);
-                        }
-                    }
-                }
-            }
+            // First run reaping on active tasks before drawing the table list interface
+            reap_background_jobs();
 
             size_t total_jobs = background_jobs.size();
             for (size_t i = 0; i < total_jobs; ++i) {
@@ -577,13 +609,6 @@ int main() {
                      << left << setw(24) << background_jobs[i].status 
                      << background_jobs[i].command << endl;
             }
-
-            // Clean up all gathered structural data records registered with a Done status
-            background_jobs.erase(
-                remove_if(background_jobs.begin(), background_jobs.end(), 
-                          [](const BackgroundJob& j) { return j.status == "Done"; }), 
-                background_jobs.end()
-            );
         }
         else if (cmd == "complete") {
             if (clean_args.size() >= 3 && clean_args[1] == "-p") {

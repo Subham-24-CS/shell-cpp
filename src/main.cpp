@@ -31,6 +31,9 @@ struct BackgroundJob {
 // List of builtins we want to support autocomplete and classification for
 const vector<string> builtins = {"echo", "exit", "complete", "jobs", "pwd", "cd", "type", "history", "declare"};
 
+// Global store for recording shell variables
+map<string, string> shell_variables;
+
 // Global registry for programmable completions: maps a command name to its completer script path
 map<string, string> programmable_completions;
 
@@ -193,7 +196,20 @@ bool execute_builtin(const string& cmd, const vector<string>& clean_args, bool &
     }
     else if (cmd == "declare") {
         if (clean_args.size() >= 3 && clean_args[1] == "-p") {
-            cout << "declare: " << clean_args[2] << ": not found" << endl;
+            string var_name = clean_args[2];
+            if (shell_variables.count(var_name)) {
+                cout << "declare -- " << var_name << "=\"" << shell_variables[var_name] << "\"" << endl;
+            } else {
+                cout << "declare: " << var_name << ": not found" << endl;
+            }
+        } else if (clean_args.size() >= 2) {
+            string expr = clean_args[1];
+            size_t eq_pos = expr.find('=');
+            if (eq_pos != string::npos) {
+                string name = expr.substr(0, eq_pos);
+                string value = expr.substr(eq_pos + 1);
+                shell_variables[name] = value;
+            }
         }
         return true;
     }
@@ -440,7 +456,7 @@ char* programmable_generator(const char* text, int state) {
                 }
             } else {
                 if (!words_before_cursor.empty()) {
-                    prev_word = words_before_cursor.back();
+                    prev_word = words_before_cursor[words_before_cursor.size() - 2];
                 }
             }
 

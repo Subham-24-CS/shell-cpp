@@ -455,8 +455,10 @@ char* programmable_generator(const char* text, int state) {
                     prev_word = words_before_cursor[words_before_cursor.size() - 2];
                 }
             } else {
-                if (!words_before_cursor.empty()) {
+                if (words_before_cursor.size() >= 2) {
                     prev_word = words_before_cursor[words_before_cursor.size() - 2];
+                } else if (!words_before_cursor.empty()) {
+                    prev_word = words_before_cursor.back();
                 }
             }
 
@@ -756,7 +758,7 @@ int main() {
             full_cmd_string += clean_args[i];
             if (i + 1 < clean_args.size()) {
                 full_cmd_string += " ";
-            }
+            }Full content code changes completed successfully
         }
         if (run_in_background) {
             full_cmd_string += " &";

@@ -139,6 +139,16 @@ void print_active_jobs_builtin() {
     );
 }
 
+// Validates whether a given string is a standard compliant identifier
+bool is_valid_identifier(const string& name) {
+    if (name.empty()) return false;
+    if (!isalpha(name[0]) && name[0] != '_') return false;
+    for (size_t i = 1; i < name.length(); ++i) {
+        if (!isalnum(name[i]) && name[i] != '_') return false;
+    }
+    return true;
+}
+
 // Helper function to handle executing builtins anywhere (main shell or inside pipe forks)
 bool execute_builtin(const string& cmd, const vector<string>& clean_args, bool &should_exit) {
     should_exit = false;
@@ -208,7 +218,15 @@ bool execute_builtin(const string& cmd, const vector<string>& clean_args, bool &
             if (eq_pos != string::npos) {
                 string name = expr.substr(0, eq_pos);
                 string value = expr.substr(eq_pos + 1);
-                shell_variables[name] = value;
+                if (is_valid_identifier(name)) {
+                    shell_variables[name] = value;
+                } else {
+                    cout << "declare: `" << expr << "': not a valid identifier" << endl;
+                }
+            } else {
+                if (!is_valid_identifier(expr)) {
+                    cout << "declare: `" << expr << "': not a valid identifier" << endl;
+                }
             }
         }
         return true;
@@ -447,7 +465,6 @@ char* programmable_generator(const char* text, int state) {
                 words_before_cursor.push_back(temp_word);
             }
 
-            // Fixed Safe Unsigned logic to prevent underflows
             if (!current_word.empty()) {
                 if (words_before_cursor.size() >= 2) {
                     prev_word = words_before_cursor[words_before_cursor.size() - 2];

@@ -11,6 +11,7 @@
 #include <set>
 #include <map>
 #include <algorithm>
+#include <cstring>
 
 // Include Readline headers
 #include <readline/readline.h>
@@ -134,6 +135,74 @@ char* filename_generator(const char* text, int state) {
     return nullptr;
 }
 
+// Custom completion generator function called by readline when a programmable completion is registered
+char* programmable_generator(const char* text, int state) {
+    static string completion_candidate;
+    static bool dynamic_match_found = false;
+
+    if (!state) {
+        completion_candidate = "";
+        dynamic_match_found = false;
+
+        // Parse the first token of the line buffer to get the matching base command
+        string current_line(rl_line_buffer);
+        stringstream ss(current_line);
+        string base_cmd;
+        ss >> base_cmd;
+
+        if (programmable_completions.count(base_cmd)) {
+            string script_path = programmable_completions[base_cmd];
+
+            int pipe_fds[2];
+            if (pipe(pipe_fds) == 0) {
+                pid_t pid = fork();
+                if (pid == 0) {
+                    // Child process setup redirection
+                    close(pipe_fds[0]);
+                    dup2(pipe_fds[1], STDOUT_FILENO);
+                    close(pipe_fds[1]);
+
+                    char* c_script = const_cast<char*>(script_path.c_str());
+                    char* c_args[] = {c_script, nullptr};
+                    execv(c_script, c_args);
+                    exit(1); 
+                } else if (pid > 0) {
+                    // Parent process reads output securely
+                    close(pipe_fds[1]);
+                    char buffer[1024];
+                    string output = "";
+                    ssize_t bytes_read;
+                    while ((bytes_read = read(pipe_fds[0], buffer, sizeof(buffer) - 1)) > 0) {
+                        buffer[bytes_read] = '\0';
+                        output += buffer;
+                    }
+                    close(pipe_fds[0]);
+                    waitpid(pid, nullptr, 0);
+
+                    // Normalize line endings and get the candidate line
+                    if (!output.empty()) {
+                        size_t pos = output.find_first_of("\r\n");
+                        if (pos != string::npos) {
+                            completion_candidate = output.substr(0, pos);
+                        } else {
+                            completion_candidate = output;
+                        }
+                        dynamic_match_found = !completion_candidate.empty();
+                    }
+                }
+            }
+        }
+    }
+
+    if (dynamic_match_found && state == 0) {
+        char* match = (char*)malloc(completion_candidate.length() + 1);
+        strcpy(match, completion_candidate.c_str());
+        return match;
+    }
+
+    return nullptr;
+}
+
 // Custom display hook used to print out matches sequentially on a new line when multiple are found.
 void display_completion_matches(char** matches, int num_matches, int max_length) {
     vector<string> items;
@@ -173,6 +242,18 @@ char** shell_completion(const char* text, int start, int end) {
     if (start == 0) {
         return rl_completion_matches(text, command_generator);
     } else {
+        // Step 1: Detect the active initial command typed on the line buffer
+        string current_line(rl_line_buffer);
+        stringstream ss(current_line);
+        string base_cmd;
+        ss >> base_cmd;
+
+        // Step 2: Check if a programmable completion is registered for this command
+        if (programmable_completions.count(base_cmd)) {
+            return rl_completion_matches(text, programmable_generator);
+        }
+
+        // Fallback context: handle file/directory searches
         char** matches = rl_completion_matches(text, filename_generator);
         if (matches && matches[0] && !matches[1]) {
             string match_str(matches[0]);
@@ -385,10 +466,8 @@ int main() {
         else if (cmd == "complete") {
             if (clean_args.size() >= 3 && clean_args[1] == "-p") {
                 string target_cmd = clean_args[2];
-                // Check if a completion path is registered for this specific command name
                 auto it = programmable_completions.find(target_cmd);
                 if (it != programmable_completions.end()) {
-                    // Reconstruct the registered item back into the normalized format specification string
                     cout << "complete -C '" << it->second << "' " << target_cmd << endl;
                 } else {
                     cout << "complete: " << target_cmd << ": no completion specification" << endl;
@@ -397,7 +476,6 @@ int main() {
             else if (clean_args.size() >= 4 && clean_args[1] == "-C") {
                 string script_path = clean_args[2];
                 string target_cmd = clean_args[3];
-                // Register or overwrite the custom completion specification in our global map storage
                 programmable_completions[target_cmd] = script_path;
             }
         }

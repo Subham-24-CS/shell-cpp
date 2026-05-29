@@ -518,9 +518,7 @@ char* programmable_generator(const char* text, int state) {
                     prev_word = words_before_cursor[words_before_cursor.size() - 2];
                 }
             } else {
-                if (words_before_cursor.size() >= 2) {
-                    prev_word = words_before_cursor[words_before_cursor.size() - 2];
-                } else if (!words_before_cursor.empty()) {
+                if (!words_before_cursor.empty()) {
                     prev_word = words_before_cursor.back();
                 }
             }
@@ -766,9 +764,18 @@ int main() {
             continue;
         }
 
-        // Apply $VAR and ${VAR} parameter expansions onto the clean parsed argument set
+        // Expand $VAR and ${VAR} parameters and remove completely empty arguments resulting from an unset variable
+        vector<string> expanded_args;
         for (size_t i = 0; i < args.size(); ++i) {
-            args[i] = expand_parameter(args[i]);
+            string expanded = expand_parameter(args[i]);
+            if (!expanded.empty()) {
+                expanded_args.push_back(expanded);
+            }
+        }
+        args = expanded_args;
+
+        if (args.empty()) {
+            continue;
         }
 
         bool redirect_output = false;

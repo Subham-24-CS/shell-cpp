@@ -173,8 +173,22 @@ bool execute_builtin(const string& cmd, const vector<string>& clean_args, bool &
         return true;
     }
     else if (cmd == "history") {
-        // Iterate through all tracked entries in the global Readline history array
-        for (int i = 0; i < history_length; ++i) {
+        int start_idx = 0;
+        
+        // Handle optional numerical limit parameter to display only the last N entries
+        if (clean_args.size() > 1) {
+            try {
+                int limit = stoi(clean_args[1]);
+                if (limit > 0 && limit < history_length) {
+                    start_idx = history_length - limit;
+                }
+            } catch (...) {
+                // If the parameter is non-numeric, fallback gracefully to printing all history
+                start_idx = 0;
+            }
+        }
+
+        for (int i = start_idx; i < history_length; ++i) {
             HIST_ENTRY* entry = history_get(i + history_base);
             if (entry) {
                 cout << setw(5) << (i + 1) << "  " << entry->line << endl;
@@ -566,7 +580,7 @@ int main() {
             continue;
         }
 
-        // Explicitly record non-empty strings into the underlying history engine
+        // Commit all parsed entries safely to history
         add_history(command_line.c_str());
 
         vector<string> args = parse_arguments(command_line);

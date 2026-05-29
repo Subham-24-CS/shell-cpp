@@ -149,29 +149,45 @@ bool is_valid_identifier(const string& name) {
     return true;
 }
 
-// Expands $VAR occurrences inside an individual string argument token
+// Expands $VAR and ${VAR} occurrences inside an individual string argument token
 string expand_parameter(const string& arg) {
     string result = "";
     size_t i = 0;
     while (i < arg.length()) {
         if (arg[i] == '$') {
-            size_t start = i + 1;
-            size_t len = 0;
-            // A valid variable name following '$' starts with a letter or underscore, 
-            // and contains alphanumeric characters or underscores.
-            if (start < arg.length() && (isalpha(arg[start]) || arg[start] == '_')) {
-                len++;
-                while (start + len < arg.length() && (isalnum(arg[start + len]) || arg[start + len] == '_')) {
+            if (i + 1 < arg.length() && arg[i + 1] == '{') {
+                size_t start = i + 2;
+                size_t len = 0;
+                while (start + len < arg.length() && arg[start + len] != '}') {
                     len++;
                 }
-                string var_name = arg.substr(start, len);
-                if (shell_variables.count(var_name)) {
-                    result += shell_variables[var_name];
+                if (start + len < arg.length() && arg[start + len] == '}') {
+                    string var_name = arg.substr(start, len);
+                    if (shell_variables.count(var_name)) {
+                        result += shell_variables[var_name];
+                    }
+                    i = start + len + 1;
+                } else {
+                    result += arg[i];
+                    i++;
                 }
-                i = start + len;
             } else {
-                result += arg[i];
-                i++;
+                size_t start = i + 1;
+                size_t len = 0;
+                if (start < arg.length() && (isalpha(arg[start]) || arg[start] == '_')) {
+                    len++;
+                    while (start + len < arg.length() && (isalnum(arg[start + len]) || arg[start + len] == '_')) {
+                        len++;
+                    }
+                    string var_name = arg.substr(start, len);
+                    if (shell_variables.count(var_name)) {
+                        result += shell_variables[var_name];
+                    }
+                    i = start + len;
+                } else {
+                    result += arg[i];
+                    i++;
+                }
             }
         } else {
             result += arg[i];
@@ -750,7 +766,7 @@ int main() {
             continue;
         }
 
-        // Apply $VAR parameter expansions onto the clean parsed argument set
+        // Apply $VAR and ${VAR} parameter expansions onto the clean parsed argument set
         for (size_t i = 0; i < args.size(); ++i) {
             args[i] = expand_parameter(args[i]);
         }

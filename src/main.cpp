@@ -25,7 +25,7 @@ struct BackgroundJob {
     int job_id;
     pid_t pid;
     string command;
-    string status;
+    string status; // "Running" or "Done"
 };
 
 // List of builtins we want to support autocomplete and classification for
@@ -37,43 +37,85 @@ map<string, string> programmable_completions;
 // Global tracking infrastructure for active background jobs
 vector<BackgroundJob> background_jobs;
 
-// Non-blocking loop iteration worker to check for exited jobs
-void reap_background_jobs() {
-    for (size_t i = 0; i < background_jobs.size(); ++i) {
-        if (background_jobs[i].status == "Running") {
+// Helper to determine the correct job control markers (+ / - / ' ') purely based on ID sorting
+char determine_job_marker(size_t index, size_t total_jobs) {
+    if (total_jobs == 0) return ' ';
+    if (index == total_jobs - 1) return '+';
+    if (index == total_jobs - 2) return '-';
+    return ' ';
+}
+
+// Scans and automatically alerts the user about completed processes right before a new prompt is drawn
+void monitor_and_notify_background_jobs() {
+    // 1. Sync actual process states with non-blocking OS queries
+    for (auto& job : background_jobs) {
+        if (job.status == "Running") {
             int status;
-            pid_t res = waitpid(background_jobs[i].pid, &status, WNOHANG);
+            pid_t res = waitpid(job.pid, &status, WNOHANG);
             if (res > 0) {
-                background_jobs[i].status = "Done";
-                // Drop trailing ampersand token notation if present on final report lines
-                if (background_jobs[i].command.size() >= 2 && 
-                    background_jobs[i].command.substr(background_jobs[i].command.size() - 2) == " &") {
-                    background_jobs[i].command = background_jobs[i].command.substr(0, background_jobs[i].command.size() - 2);
+                job.status = "Done";
+                // Strip the trailing background ampersand context notation safely
+                if (job.command.size() >= 2 && job.command.substr(job.command.size() - 2) == " &") {
+                    job.command = job.command.substr(0, job.command.size() - 2);
                 }
             }
         }
     }
+
+    // 2. Ensure jobs are perfectly sorted by Job ID for uniform marker assignment
+    sort(background_jobs.begin(), background_jobs.end(), [](const BackgroundJob& a, const BackgroundJob& b) {
+        return a.job_id < b.job_id;
+    });
+
+    // 3. Print notifications exclusively for background jobs that just completed
+    size_t total_jobs = background_jobs.size();
+    for (size_t i = 0; i < total_jobs; ++i) {
+        if (background_jobs[i].status == "Done") {
+            char marker = determine_job_marker(i, total_jobs);
+            cout << "[" << background_jobs[i].job_id << "]" << marker << "  " 
+                 << left << setw(24) << background_jobs[i].status 
+                 << background_jobs[i].command << endl;
+        }
+    }
+
+    // 4. Purge the completed jobs so they aren't notified or printed again
+    background_jobs.erase(
+        remove_if(background_jobs.begin(), background_jobs.end(), 
+                  [](const BackgroundJob& j) { return j.status == "Done"; }), 
+        background_jobs.end()
+    );
 }
 
-// Helper to update current markers (+/-) and output the jobs correctly sorted
-void display_jobs_list() {
-    // Sort background jobs strictly by Job ID
+// Explicit execution function when user prints background processes with the `jobs` builtin
+void print_active_jobs_builtin() {
+    // Final dynamic check for any instant transitions
+    for (auto& job : background_jobs) {
+        if (job.status == "Running") {
+            int status;
+            pid_t res = waitpid(job.pid, &status, WNOHANG);
+            if (res > 0) {
+                job.status = "Done";
+                if (job.command.size() >= 2 && job.command.substr(job.command.size() - 2) == " &") {
+                    job.command = job.command.substr(0, job.command.size() - 2);
+                }
+            }
+        }
+    }
+
+    // Sort strictly by Job ID
     sort(background_jobs.begin(), background_jobs.end(), [](const BackgroundJob& a, const BackgroundJob& b) {
         return a.job_id < b.job_id;
     });
 
     size_t total_jobs = background_jobs.size();
     for (size_t i = 0; i < total_jobs; ++i) {
-        char marker = ' ';
-        if (i == total_jobs - 1) marker = '+';
-        else if (i == total_jobs - 2) marker = '-';
-
+        char marker = determine_job_marker(i, total_jobs);
         cout << "[" << background_jobs[i].job_id << "]" << marker << "  " 
              << left << setw(24) << background_jobs[i].status 
              << background_jobs[i].command << endl;
     }
 
-    // Clean up finished jobs after they have been reported
+    // Wiping the "Done" processes post-explicit request as per standard shell protocol
     background_jobs.erase(
         remove_if(background_jobs.begin(), background_jobs.end(), 
                   [](const BackgroundJob& j) { return j.status == "Done"; }), 
@@ -112,8 +154,7 @@ bool execute_builtin(const string& cmd, const vector<string>& clean_args, bool &
         return true;
     }
     else if (cmd == "jobs") {
-        reap_background_jobs();
-        display_jobs_list();
+        print_active_jobs_builtin();
         return true;
     }
     else if (cmd == "complete") {
@@ -584,8 +625,8 @@ int main() {
     rl_completion_display_matches_hook = display_completion_matches;
 
     while (true) {
-        // Run a state sync iteration cycle directly preceding the prompt invocation
-        reap_background_jobs();
+        // Run state sync iteration cycle directly preceding prompt rendering
+        monitor_and_notify_background_jobs();
 
         char* input_raw = readline("$ ");
         

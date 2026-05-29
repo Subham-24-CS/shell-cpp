@@ -20,7 +20,7 @@
 using namespace std;
 
 // List of builtins we want to support autocomplete for
-const vector<string> builtins = {"echo", "exit", "complete"};
+const vector<string> builtins = {"echo", "exit", "complete", "jobs"};
 
 // Global registry for programmable completions: maps a command name to its completer script path
 map<string, string> programmable_completions;
@@ -512,6 +512,9 @@ int main() {
             }
             cout << endl;
         }
+        else if (cmd == "jobs") {
+            // Empty implementation for this stage. Leaves stdout blank.
+        }
         else if (cmd == "complete") {
             if (clean_args.size() >= 3 && clean_args[1] == "-p") {
                 string target_cmd = clean_args[2];
@@ -540,7 +543,7 @@ int main() {
             }
             string com = clean_args[1];
             
-            if (com == "exit" || com == "type" || com == "echo" || com == "pwd" || com == "cd" || com == "complete") {
+            if (com == "exit" || com == "type" || com == "echo" || com == "pwd" || com == "cd" || com == "complete" || com == "jobs") {
                 cout << com << " is a shell builtin" << endl;
             }
             else {

@@ -625,40 +625,55 @@ int main() {
 
         string cmd = clean_args[0];
 
-        // Check for basic pipeline syntax (cmd1 | cmd2)
+        // Check for basic or multi-stage pipeline syntax (cmd1 | cmd2 | cmd3 ...)
         auto pipe_it = find(clean_args.begin(), clean_args.end(), "|");
         if (pipe_it != clean_args.end()) {
-            vector<string> left_args(clean_args.begin(), pipe_it);
-            vector<string> right_args(pipe_it + 1, clean_args.end());
+            // Group segments separated by '|'
+            vector<vector<string>> pipeline_cmds;
+            vector<string> current_sub_cmd;
+            for (const auto& token : clean_args) {
+                if (token == "|") {
+                    if (!current_sub_cmd.empty()) {
+                        pipeline_cmds.push_back(current_sub_cmd);
+                        current_sub_cmd.clear();
+                    }
+                } else {
+                    current_sub_cmd.push_back(token);
+                }
+            }
+            if (!current_sub_cmd.empty()) {
+                pipeline_cmds.push_back(current_sub_cmd);
+            }
 
-            if (!left_args.empty() && !right_args.empty()) {
+            size_t num_cmds = pipeline_cmds.size();
+            int infile_fd = STDIN_FILENO; 
+            vector<pid_t> child_pids;
+
+            for (size_t i = 0; i < num_cmds; ++i) {
                 int pipe_fds[2];
-                if (pipe(pipe_fds) == 0) {
-                    pid_t pid1 = fork();
-                    if (pid1 == 0) {
-                        // First child redirects stdout to pipe write-end
+                // Create a pipe for all except the absolute last stage command
+                if (i < num_cmds - 1) {
+                    if (pipe(pipe_fds) < 0) {
+                        perror("pipe");
+                        break;
+                    }
+                }
+
+                pid_t pid = fork();
+                if (pid == 0) {
+                    // Route input from previous stage (if any)
+                    if (infile_fd != STDIN_FILENO) {
+                        dup2(infile_fd, STDIN_FILENO);
+                        close(infile_fd);
+                    }
+
+                    // Route output to next stage (if any)
+                    if (i < num_cmds - 1) {
                         dup2(pipe_fds[1], STDOUT_FILENO);
                         close(pipe_fds[0]);
                         close(pipe_fds[1]);
-
-                        bool dummy_exit;
-                        if (!execute_builtin(left_args[0], left_args, dummy_exit)) {
-                            vector<char*> c_left_args;
-                            for (auto& s : left_args) c_left_args.push_back(&s[0]);
-                            c_left_args.push_back(nullptr);
-                            execvp(c_left_args[0], c_left_args.data());
-                        }
-                        exit(0);
-                    }
-
-                    pid_t pid2 = fork();
-                    if (pid2 == 0) {
-                        // Second child redirects stdin to pipe read-end
-                        dup2(pipe_fds[0], STDIN_FILENO);
-                        close(pipe_fds[0]);
-                        close(pipe_fds[1]);
-
-                        // Handle absolute output file redirections if specified
+                    } else {
+                        // Final stage command respects master file redirections
                         if (redirect_output) {
                             int flags = O_WRONLY | O_CREAT | (append_output ? O_APPEND : O_TRUNC);
                             int fd_out = open(redirect_file.c_str(), flags, 0644);
@@ -675,45 +690,56 @@ int main() {
                                 close(fd_err);
                             }
                         }
-
-                        bool dummy_exit;
-                        if (!execute_builtin(right_args[0], right_args, dummy_exit)) {
-                            vector<char*> c_right_args;
-                            for (auto& s : right_args) c_right_args.push_back(&s[0]);
-                            c_right_args.push_back(nullptr);
-                            execvp(c_right_args[0], c_right_args.data());
-                        }
-                        exit(0);
                     }
 
-                    // Parent closes pipeline channels safely
-                    close(pipe_fds[0]);
-                    close(pipe_fds[1]);
-
-                    if (run_in_background) {
-                        set<int> active_ids;
-                        for (const auto& job : background_jobs) {
-                            active_ids.insert(job.job_id);
-                        }
-                        int assigned_id = 1;
-                        while (active_ids.count(assigned_id)) assigned_id++;
-
-                        cout << "[" << assigned_id << "] " << pid2 << endl;
-
-                        BackgroundJob new_job;
-                        new_job.job_id = assigned_id;
-                        new_job.pid = pid2;
-                        new_job.command = full_cmd_string;
-                        new_job.status = "Running";
-
-                        background_jobs.push_back(new_job);
-                        sort(background_jobs.begin(), background_jobs.end(), [](const BackgroundJob& a, const BackgroundJob& b) {
-                            return a.job_id < b.job_id;
-                        });
-                    } else {
-                        waitpid(pid1, nullptr, 0);
-                        waitpid(pid2, nullptr, 0);
+                    bool dummy_exit;
+                    if (!execute_builtin(pipeline_cmds[i][0], pipeline_cmds[i], dummy_exit)) {
+                        vector<char*> c_sub_args;
+                        for (auto& s : pipeline_cmds[i]) c_sub_args.push_back(&s[0]);
+                        c_sub_args.push_back(nullptr);
+                        execvp(c_sub_args[0], c_sub_args.data());
                     }
+                    exit(0);
+                } else if (pid > 0) {
+                    child_pids.push_back(pid);
+                    
+                    // Clean up parent side files to avoid running out of descriptors or blocking streams
+                    if (infile_fd != STDIN_FILENO) {
+                        close(infile_fd);
+                    }
+                    if (i < num_cmds - 1) {
+                        close(pipe_fds[1]);
+                        infile_fd = pipe_fds[0]; // Next command reads from here
+                    }
+                }
+            }
+
+            if (run_in_background) {
+                set<int> active_ids;
+                for (const auto& job : background_jobs) {
+                    active_ids.insert(job.job_id);
+                }
+                int assigned_id = 1;
+                while (active_ids.count(assigned_id)) assigned_id++;
+
+                // Track final pipeline sink command process
+                pid_t monitored_pid = child_pids.empty() ? -1 : child_pids.back();
+                cout << "[" << assigned_id << "] " << monitored_pid << endl;
+
+                BackgroundJob new_job;
+                new_job.job_id = assigned_id;
+                new_job.pid = monitored_pid;
+                new_job.command = full_cmd_string;
+                new_job.status = "Running";
+
+                background_jobs.push_back(new_job);
+                sort(background_jobs.begin(), background_jobs.end(), [](const BackgroundJob& a, const BackgroundJob& b) {
+                    return a.job_id < b.job_id;
+                });
+            } else {
+                // Synchronously wait for every process in the pipeline chain to yield
+                for (pid_t p : child_pids) {
+                    waitpid(p, nullptr, 0);
                 }
             }
             continue;

@@ -35,7 +35,6 @@ const vector<string> builtins = {"echo", "exit", "complete", "jobs"};
 map<string, string> programmable_completions;
 
 // Global tracking infrastructure for active background jobs
-int job_counter = 0;
 vector<BackgroundJob> background_jobs;
 
 // Non-blocking loop iteration worker to check for exited jobs
@@ -722,16 +721,31 @@ int main() {
                 } else {
                     // Parent process
                     if (run_in_background) {
-                        job_counter++;
-                        cout << "[" << job_counter << "] " << pid << endl;
+                        // Dynamically determine the lowest unassigned positive integer for the job ID
+                        set<int> active_ids;
+                        for (const auto& job : background_jobs) {
+                            active_ids.insert(job.job_id);
+                        }
+                        
+                        int assigned_id = 1;
+                        while (active_ids.count(assigned_id)) {
+                            assigned_id++;
+                        }
+
+                        cout << "[" << assigned_id << "] " << pid << endl;
                         
                         // Register background job metrics securely
                         BackgroundJob new_job;
-                        new_job.job_id = job_counter;
+                        new_job.job_id = assigned_id;
                         new_job.pid = pid;
                         new_job.command = full_cmd_string;
                         new_job.status = "Running";
+                        
+                        // Keep the list sorted by job_id so markers (+ and -) map sequentially 
                         background_jobs.push_back(new_job);
+                        sort(background_jobs.begin(), background_jobs.end(), [](const BackgroundJob& a, const BackgroundJob& b) {
+                            return a.job_id < b.job_id;
+                        });
                     } else {
                         waitpid(pid, nullptr, 0);
                     }

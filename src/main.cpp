@@ -549,10 +549,18 @@ int main() {
             cout << endl;
         }
         else if (cmd == "jobs") {
-            for (const auto& job : background_jobs) {
-                cout << "[" << job.job_id << "]+  " 
-                     << left << setw(24) << job.status 
-                     << job.command << endl;
+            size_t total_jobs = background_jobs.size();
+            for (size_t i = 0; i < total_jobs; ++i) {
+                char marker = ' ';
+                if (i == total_jobs - 1) {
+                    marker = '+';
+                } else if (i == total_jobs - 2) {
+                    marker = '-';
+                }
+
+                cout << "[" << background_jobs[i].job_id << "]" << marker << "  " 
+                     << left << setw(24) << background_jobs[i].status 
+                     << background_jobs[i].command << endl;
             }
         }
         else if (cmd == "complete") {

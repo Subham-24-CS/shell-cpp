@@ -173,6 +173,22 @@ bool execute_builtin(const string& cmd, const vector<string>& clean_args, bool &
         return true;
     }
     else if (cmd == "history") {
+        // Support reading history from file via: history -r <path>
+        if (clean_args.size() > 2 && clean_args[1] == "-r") {
+            string history_file_path = clean_args[2];
+            ifstream hist_file(history_file_path);
+            if (hist_file.is_open()) {
+                string line;
+                while (getline(hist_file, line)) {
+                    if (!line.empty()) {
+                        add_history(line.c_str());
+                    }
+                }
+                hist_file.close();
+            }
+            return true;
+        }
+
         int start_idx = 0;
         
         // Handle optional numerical limit parameter to display only the last N entries

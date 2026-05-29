@@ -661,97 +661,173 @@ int main() {
             }
         }
         else {
-            // Check for external commands in PATH
-            bool found = false;
-            string executable_path;
-            char* path_env = getenv("PATH");
+            // Check for basic pipeline syntax (cmd1 | cmd2)
+            auto pipe_it = find(clean_args.begin(), clean_args.end(), "|");
+            if (pipe_it != clean_args.end()) {
+                vector<string> left_args(clean_args.begin(), pipe_it);
+                vector<string> right_args(pipe_it + 1, clean_args.end());
 
-            if (path_env) {
-                stringstream ss_path(path_env);
-                string path_dir;
-                while (getline(ss_path, path_dir, ':')) {
-                    string full_path = path_dir + '/' + cmd;
-                    if (access(full_path.c_str(), X_OK) == 0) {
-                        executable_path = full_path;
-                        found = true;
-                        break;
-                    }
-                }
-            }
+                if (!left_args.empty() && !right_args.empty()) {
+                    int pipe_fds[2];
+                    if (pipe(pipe_fds) == 0) {
+                        pid_t pid1 = fork();
+                        if (pid1 == 0) {
+                            // First child redirects stdout to pipe write-end
+                            dup2(pipe_fds[1], STDOUT_FILENO);
+                            close(pipe_fds[0]);
+                            close(pipe_fds[1]);
 
-            if (found) {
-                vector<char*> c_args;
-                for (auto& s : clean_args) {
-                    c_args.push_back(&s[0]);
-                }
-                c_args.push_back(nullptr);
+                            vector<char*> c_left_args;
+                            for (auto& s : left_args) c_left_args.push_back(&s[0]);
+                            c_left_args.push_back(nullptr);
 
-                pid_t pid = fork();
-                if (pid == 0) {
-                    // Child standard output redirection
-                    if (redirect_output) {
-                        int flags = O_WRONLY | O_CREAT;
-                        if (append_output) {
-                            flags |= O_APPEND;
+                            execvp(c_left_args[0], c_left_args.data());
+                            exit(1);
+                        }
+
+                        pid_t pid2 = fork();
+                        if (pid2 == 0) {
+                            // Second child redirects stdin to pipe read-end
+                            dup2(pipe_fds[0], STDIN_FILENO);
+                            close(pipe_fds[0]);
+                            close(pipe_fds[1]);
+
+                            // Second child handles ultimate output redirection if present
+                            if (redirect_output) {
+                                int flags = O_WRONLY | O_CREAT | (append_output ? O_APPEND : O_TRUNC);
+                                int fd_out = open(redirect_file.c_str(), flags, 0644);
+                                if (fd_out != -1) {
+                                    dup2(fd_out, STDOUT_FILENO);
+                                    close(fd_out);
+                                }
+                            }
+                            if (redirect_error) {
+                                int flags = O_WRONLY | O_CREAT | (append_error ? O_APPEND : O_TRUNC);
+                                int fd_err = open(error_file.c_str(), flags, 0644);
+                                if (fd_err != -1) {
+                                    dup2(fd_err, STDERR_FILENO);
+                                    close(fd_err);
+                                }
+                            }
+
+                            vector<char*> c_right_args;
+                            for (auto& s : right_args) c_right_args.push_back(&s[0]);
+                            c_right_args.push_back(nullptr);
+
+                            execvp(c_right_args[0], c_right_args.data());
+                            exit(1);
+                        }
+
+                        // Parent closes infrastructure pipe channels safely
+                        close(pipe_fds[0]);
+                        close(pipe_fds[1]);
+
+                        if (run_in_background) {
+                            set<int> active_ids;
+                            for (const auto& job : background_jobs) {
+                                active_ids.insert(job.job_id);
+                            }
+                            int assigned_id = 1;
+                            while (active_ids.count(assigned_id)) assigned_id++;
+
+                            cout << "[" << assigned_id << "] " << pid2 << endl;
+
+                            BackgroundJob new_job;
+                            new_job.job_id = assigned_id;
+                            new_job.pid = pid2; // Track final output sink process
+                            new_job.command = full_cmd_string;
+                            new_job.status = "Running";
+
+                            background_jobs.push_back(new_job);
+                            sort(background_jobs.begin(), background_jobs.end(), [](const BackgroundJob& a, const BackgroundJob& b) {
+                                return a.job_id < b.job_id;
+                            });
                         } else {
-                            flags |= O_TRUNC;
+                            waitpid(pid1, nullptr, 0);
+                            waitpid(pid2, nullptr, 0);
                         }
-                        int fd_out = open(redirect_file.c_str(), flags, 0644);
-                        if (fd_out != -1) {
-                            dup2(fd_out, STDOUT_FILENO);
-                            close(fd_out);
-                        }
-                    }
-                    // Child standard error redirection
-                    if (redirect_error) {
-                        int flags = O_WRONLY | O_CREAT;
-                        if (append_error) {
-                            flags |= O_APPEND;
-                        } else {
-                            flags |= O_TRUNC;
-                        }
-                        int fd_err = open(error_file.c_str(), flags, 0644);
-                        if (fd_err != -1) {
-                            dup2(fd_err, STDERR_FILENO);
-                            close(fd_err);
-                        }
-                    }
-                    execvp(c_args[0], c_args.data());
-                    exit(1); 
-                } else {
-                    // Parent process
-                    if (run_in_background) {
-                        // Dynamically determine the lowest unassigned positive integer for the job ID
-                        set<int> active_ids;
-                        for (const auto& job : background_jobs) {
-                            active_ids.insert(job.job_id);
-                        }
-                        
-                        int assigned_id = 1;
-                        while (active_ids.count(assigned_id)) {
-                            assigned_id++;
-                        }
-
-                        cout << "[" << assigned_id << "] " << pid << endl;
-                        
-                        // Register background job metrics securely
-                        BackgroundJob new_job;
-                        new_job.job_id = assigned_id;
-                        new_job.pid = pid;
-                        new_job.command = full_cmd_string;
-                        new_job.status = "Running";
-                        
-                        // Keep the list sorted by job_id so markers (+ and -) map sequentially 
-                        background_jobs.push_back(new_job);
-                        sort(background_jobs.begin(), background_jobs.end(), [](const BackgroundJob& a, const BackgroundJob& b) {
-                            return a.job_id < b.job_id;
-                        });
-                    } else {
-                        waitpid(pid, nullptr, 0);
                     }
                 }
             } else {
-                cout << cmd << ": command not found" << endl;
+                // Check for external commands in PATH
+                bool found = false;
+                string executable_path;
+                char* path_env = getenv("PATH");
+
+                if (path_env) {
+                    stringstream ss_path(path_env);
+                    string path_dir;
+                    while (getline(ss_path, path_dir, ':')) {
+                        string full_path = path_dir + '/' + cmd;
+                        if (access(full_path.c_str(), X_OK) == 0) {
+                            executable_path = full_path;
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (found) {
+                    vector<char*> c_args;
+                    for (auto& s : clean_args) {
+                        c_args.push_back(&s[0]);
+                    }
+                    c_args.push_back(nullptr);
+
+                    pid_t pid = fork();
+                    if (pid == 0) {
+                        // Child standard output redirection
+                        if (redirect_output) {
+                            int flags = O_WRONLY | O_CREAT | (append_output ? O_APPEND : O_TRUNC);
+                            int fd_out = open(redirect_file.c_str(), flags, 0644);
+                            if (fd_out != -1) {
+                                dup2(fd_out, STDOUT_FILENO);
+                                close(fd_out);
+                            }
+                        }
+                        // Child standard error redirection
+                        if (redirect_error) {
+                            int flags = O_WRONLY | O_CREAT | (append_error ? O_APPEND : O_TRUNC);
+                            int fd_err = open(error_file.c_str(), flags, 0644);
+                            if (fd_err != -1) {
+                                dup2(fd_err, STDERR_FILENO);
+                                close(fd_err);
+                            }
+                        }
+                        execvp(c_args[0], c_args.data());
+                        exit(1); 
+                    } else {
+                        // Parent process
+                        if (run_in_background) {
+                            set<int> active_ids;
+                            for (const auto& job : background_jobs) {
+                                active_ids.insert(job.job_id);
+                            }
+                            
+                            int assigned_id = 1;
+                            while (active_ids.count(assigned_id)) {
+                                assigned_id++;
+                            }
+
+                            cout << "[" << assigned_id << "] " << pid << endl;
+                            
+                            BackgroundJob new_job;
+                            new_job.job_id = assigned_id;
+                            new_job.pid = pid;
+                            new_job.command = full_cmd_string;
+                            new_job.status = "Running";
+                            
+                            background_jobs.push_back(new_job);
+                            sort(background_jobs.begin(), background_jobs.end(), [](const BackgroundJob& a, const BackgroundJob& b) {
+                                return a.job_id < b.job_id;
+                            });
+                        } else {
+                            waitpid(pid, nullptr, 0);
+                        }
+                    }
+                } else {
+                    cout << cmd << ": command not found" << endl;
+                }
             }
         }
 

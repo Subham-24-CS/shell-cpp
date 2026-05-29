@@ -137,12 +137,12 @@ char* filename_generator(const char* text, int state) {
 
 // Custom completion generator function called by readline when a programmable completion is registered
 char* programmable_generator(const char* text, int state) {
-    static string completion_candidate;
-    static bool dynamic_match_found = false;
+    static vector<string> programmable_matches;
+    static size_t programmable_index = 0;
 
     if (!state) {
-        completion_candidate = "";
-        dynamic_match_found = false;
+        programmable_matches.clear();
+        programmable_index = 0;
 
         string current_line(rl_line_buffer);
         stringstream ss(current_line);
@@ -227,24 +227,30 @@ char* programmable_generator(const char* text, int state) {
                     close(pipe_fds[0]);
                     waitpid(pid, nullptr, 0);
 
-                    // Normalize line endings and get the candidate line
+                    // Parse all newline-separated completion lines returned by the script
                     if (!output.empty()) {
-                        size_t pos = output.find_first_of("\r\n");
-                        if (pos != string::npos) {
-                            completion_candidate = output.substr(0, pos);
-                        } else {
-                            completion_candidate = output;
+                        stringstream output_ss(output);
+                        string line;
+                        while (getline(output_ss, line)) {
+                            // Strip any trailing carriage returns if present
+                            if (!line.empty() && line.back() == '\r') {
+                                line.pop_back();
+                            }
+                            if (!line.empty()) {
+                                programmable_matches.push_back(line);
+                            }
                         }
-                        dynamic_match_found = !completion_candidate.empty();
                     }
                 }
             }
         }
     }
 
-    if (dynamic_match_found && state == 0) {
-        char* match = (char*)malloc(completion_candidate.length() + 1);
-        strcpy(match, completion_candidate.c_str());
+    // Sequentially return every parsed match candidate line back to Readline
+    if (programmable_index < programmable_matches.size()) {
+        const string& match_str = programmable_matches[programmable_index++];
+        char* match = (char*)malloc(match_str.length() + 1);
+        strcpy(match, match_str.c_str());
         return match;
     }
 

@@ -238,7 +238,6 @@ bool execute_builtin(const string& cmd, const vector<string>& clean_args, bool &
         return true;
     }
     else if (cmd == "history") {
-        // Support appending new unwritten lines via: history -a <path>
         if (clean_args.size() > 2 && clean_args[1] == "-a") {
             string history_file_path = clean_args[2];
             ofstream hist_file(history_file_path, ios::out | ios::app);
@@ -254,7 +253,6 @@ bool execute_builtin(const string& cmd, const vector<string>& clean_args, bool &
             }
             return true;
         }
-        // Support reading history from file via: history -r <path>
         else if (clean_args.size() > 2 && clean_args[1] == "-r") {
             string history_file_path = clean_args[2];
             ifstream hist_file(history_file_path);
@@ -270,7 +268,6 @@ bool execute_builtin(const string& cmd, const vector<string>& clean_args, bool &
             }
             return true;
         }
-        // Support writing memory history to file via: history -w <path>
         else if (clean_args.size() > 2 && clean_args[1] == "-w") {
             string history_file_path = clean_args[2];
             ofstream hist_file(history_file_path, ios::out | ios::trunc);
@@ -450,6 +447,7 @@ char* programmable_generator(const char* text, int state) {
                 words_before_cursor.push_back(temp_word);
             }
 
+            // Fixed Safe Unsigned logic to prevent underflows
             if (!current_word.empty()) {
                 if (words_before_cursor.size() >= 2) {
                     prev_word = words_before_cursor[words_before_cursor.size() - 2];
@@ -685,7 +683,6 @@ int main() {
         char* input_raw = readline("$ ");
         
         if (!input_raw) {
-            // Implicit EOF / Ctrl+D exit strategy handler
             save_history_to_histfile();
             break; 
         }
@@ -697,7 +694,6 @@ int main() {
             continue;
         }
 
-        // Commit all entries immediately to history memory so the current command can be captured
         add_history(command_line.c_str());
 
         vector<string> args = parse_arguments(command_line);
@@ -758,7 +754,7 @@ int main() {
             full_cmd_string += clean_args[i];
             if (i + 1 < clean_args.size()) {
                 full_cmd_string += " ";
-            }Full content code changes completed successfully
+            }
         }
         if (run_in_background) {
             full_cmd_string += " &";
@@ -885,7 +881,6 @@ int main() {
             if (should_exit) {
                 cout.rdbuf(old_cout);
                 cerr.rdbuf(old_cerr);
-                // Explicit command exit strategy handler
                 save_history_to_histfile();
                 break;
             }

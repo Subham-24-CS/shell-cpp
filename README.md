@@ -95,6 +95,15 @@ sudo apt-get install build-essential cmake libreadline-dev
 
   $ echo "Hello from our custom C++ shell"
   Hello from our custom C++ shell
+
+  $ echo "Hello    World"
+  Hello    World
+
+  $ echo 'Text with  single  quotes'
+  Text with  single  quotes
+
+  $ echo Embedded\ \ Spaces\ \ via\ \ Escapes
+  Embedded  Spaces  via  Escapes
   ```
 - Variable Declaration & Parameter Expansion
   ```text
@@ -130,8 +139,24 @@ sudo apt-get install build-essential cmake libreadline-dev
   ```
 - Session History Interactivity
   - Press the `Up` and `Down` arrow keys to seamlessly traverse previous commands.
-  - Force save your in-memory history registry to an external file:
+  - Append History (`-a`): Appends newly executed session commands into your history file.
+  - Read History (`-r`): Reads the contents of your history file and appends them to the current session history.
+  - Write History (`-w`): Force save your in-memory history registry to an external file:
     ```text
     $ history -w backup_history.txt
     ```
-  
+- Custom Programmable Autocompletion
+  You can program your shell to call external scripts to generate custom tab-completions for specific commands using the `-C` flag:
+  ```text
+  # Register an external script to handle completions for a custom command 'mycmd'
+  $ complete -C /path/to/my_completion_script.sh mycmd
+
+  # View currently registered custom programmable completions
+  $ complete -p
+  complete -C /path/to/my_completion_script.sh mycmd
+
+  # Pressing [TAB] after typing 'mycmd ' will now safely execute your script in a child process to provide suggestions!
+
+  # Remove the custom completion registration
+  $ complete -r mycmd
+  ```

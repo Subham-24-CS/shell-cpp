@@ -43,3 +43,30 @@ A fully functional, POSIX-compliant minimalist shell environment written from sc
 ├── codecrafters.yml              # Deployment integration configurations
 ├── your_program.sh               # Initialization/execution launcher script
 └── README.md                     # Documentation
+
+```
+
+## Compilation and Setup Guide 
+
+The project relies on a modern C++ compiler supporting C++17 or higher, along with the `GNU Readline` package library. Package management is natively orchestrated using `vcpkg` and built using `CMake`
+
+### Prerequisites
+
+Ensure you have your toolchain installed (For Ubuntu/Debian users)
+
+```text
+sudo apt-get update
+sudo apt-get install build-essential cmake libreadline-dev
+```
+
+### Installation Steps
+
+- **Build Project** : Initialize configuration and build the target binary from the workspace root
+  ```text
+  cmake -B build -DCMAKE_BUILD_TYPE=Release
+  cmake --build build
+  ```
+- **Run Environment** : Launch the shell via the convenience runner script
+  ```text
+  ./your_program.sh
+  ```

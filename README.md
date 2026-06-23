@@ -81,3 +81,57 @@ sudo apt-get install build-essential cmake libreadline-dev
   ```text
   ./your_program.sh
   ```
+
+## Usage Guide
+
+- Basic Commands
+  ```text
+  $ pwd
+  /home/developer/workspace
+
+  $ cd src
+  $ pwd
+  /home/developer/workspace/src
+
+  $ echo "Hello from our custom C++ shell"
+  Hello from our custom C++ shell
+  ```
+- Variable Declaration & Parameter Expansion
+  ```text
+  $declare MY_VAR="Project-Alpha"$ echo $MY_VAR
+  Project-Alpha
+
+  $ echo "Working on ${MY_VAR}_v2"
+  Working on Project-Alpha_v2
+  ```
+- Pipelines & I/O Redirection
+  ```text
+  $type echo > output.txt$ cat output.txt
+  echo is a shell builtin
+  
+  $ ls non_existent_file 2>> error.log
+  
+  $ history | grep echo
+      1  echo "Hello from our custom C++ shell"
+      2  declare MY_VAR="Project-Alpha"
+      3  echo $MY_VAR
+  ```
+- Job Control (Background Execution)
+  ```text
+  $ sleep 10 &
+  [1] 12345
+
+  # View background jobs manually
+  $ jobs
+  [1]+  Running                 sleep 10 &
+
+  # Upon process completion, right before the subsequent prompt renders:
+  [1]+  Done                    sleep 10
+  ```
+- Session History Interactivity
+  - Press the `Up` and `Down` arrow keys to seamlessly traverse previous commands.
+  - Force save your in-memory history registry to an external file:
+    ```text
+    $ history -w backup_history.txt
+    ```
+  
